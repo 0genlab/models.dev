@@ -5,12 +5,13 @@
 # $.reasoning_effort on /v1/chat/completions (alias $.reasoning.effort, which is also the Responses field);
 # $.output_config.effort on /v1/messages, subject to model support.
 # https://docs.aihubmix.com/cn/api/unified-inference
-# The host narrows the levels per model — this set is shared by all seven DeepSeek
-# routes — but `low` is not observably distinct here: probed 2026-09-15, low/high/max
-# return 522/564/510 reasoning tokens on one prompt, non-monotonic across levels, and
-# the lab's own docs give `reasoning_effort = high|max` with low/medium aliased to high.
-# `none` turns thinking off here yet is absent from the published set. Both gaps are
-# the host's to state; this file follows what it publishes.
+# These three are the lab's own published levels, passed through unchanged: DeepSeek
+# documents `reasoning_effort` as `Possible values: [low, high, max]`, with `medium`
+# and `xhigh` folded into `high` (api-docs.deepseek.com, checked 2026-08-13), and all
+# seven DeepSeek routes here carry the same set. Probing on 2026-09-15 could not
+# separate them on a single prompt (low/high/max → 522/564/510 reasoning tokens,
+# non-monotonic), which says something about that prompt, not about the enum.
+# Off is the toggle on this path; `none` is a level only on the Responses face.
 base_model = "deepseek/deepseek-v4-pro-0813"
 
 [interleaved]
