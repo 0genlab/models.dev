@@ -1,9 +1,6 @@
-# Off is effort=none; graded levels — no toggle. The same off elsewhere:
+# Toggle:
 # $.enable_thinking = true|false on the OpenAI-compatible /v1/chat/completions path (verified live 2026-09-11);
 # $.thinking.type = "enabled"|"disabled"|"adaptive" on /v1/messages; $.generationConfig.thinkingConfig on the Gemini path.
-# Effort: none|minimal|low|medium|high|xhigh|max
-# $.reasoning_effort on /v1/chat/completions (alias $.reasoning.effort, which is also the Responses field);
-# $.output_config.effort on /v1/messages, subject to model support.
 # Budget:
 # integer $.reasoning.max_tokens on /v1/chat/completions; $.thinking.budget_tokens >= 1024 on /v1/messages;
 # integer $.generationConfig.thinkingConfig.thinkingBudget on the Gemini path (-1 dynamic, 0 off where supported);
@@ -15,8 +12,7 @@ base_model = "alibaba/qwen3.7-flash"
 field = "reasoning_content"
 
 [[reasoning_options]]
-type = "effort"
-values = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+type = "toggle"
 
 [[reasoning_options]]
 type = "budget_tokens"

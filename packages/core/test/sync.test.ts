@@ -5897,6 +5897,75 @@ test("reads a steering pair from the AIHubMix list rather than the word `reasoni
   expect(aihubmix.parseModels({ data: offOnly }).map((model) => model.model_id)).toEqual(["glm-5.1"]);
 });
 
+test("drops an AIHubMix effort list that is the protocol's enum rather than the model's", () => {
+  // Standalone so the row itself is the whole answer: a vendor would send the
+  // build down the factoring path and read levels off the lab entry instead.
+  const standalone = {
+    vendor: null,
+    release_date: "2026-05-01",
+    open_weights: false,
+    context_length: 262_144,
+    max_output: 65_536,
+  } satisfies Partial<AihubmixModel>;
+  // The host echoes the OpenAI chat protocol's whole `ReasoningEffort` enum for a
+  // route it holds no per-model levels for, and the routes it lands on give it
+  // away: `grok-4-fast-non-reasoning` says in its own name that it does not
+  // reason, yet carries all seven. Copying that would publish a ladder no caller
+  // can steer with, so the list is dropped and the controls that are the model's
+  // — its toggle, its budget — carry the surface alone.
+  const protocolEnum = aihubmixModel({
+    ...standalone,
+    model_id: "qwen3.7-flash",
+    model_name: "Qwen3.7 Flash",
+    reasoning_options: [
+      { type: "toggle" },
+      { type: "effort", values: ["none", "minimal", "low", "medium", "high", "xhigh", "max"] },
+      { type: "budget_tokens" },
+    ],
+  });
+  expect(buildAihubmixModel(protocolEnum, undefined, aihubmixLabIDs)?.reasoning_options).toEqual([
+    { type: "toggle" },
+    { type: "budget_tokens", min: undefined, max: undefined },
+  ]);
+
+  // Order is the payload's, not a canonical one: the same seven arrive shuffled
+  // across routes, so membership is what decides.
+  const shuffled = aihubmixModel({
+    ...standalone,
+    model_id: "qwen3.6-flash",
+    model_name: "Qwen3.6 Flash",
+    reasoning_options: [
+      { type: "effort", values: ["minimal", "low", "medium", "high", "xhigh", "max", "none"] },
+    ],
+  });
+  expect(buildAihubmixModel(shuffled, undefined, aihubmixLabIDs)?.reasoning_options).toBeUndefined();
+
+  // A narrowed list is the model's own and survives untouched, including one that
+  // happens to be long: Qwen 3.8 states `low|medium|xhigh` where 3.7 gets the enum,
+  // and six of the seven levels is still a statement about the model.
+  const narrowed = aihubmixModel({
+    ...standalone,
+    model_id: "qwen3.8-max",
+    model_name: "Qwen3.8 Max",
+    reasoning_options: [{ type: "effort", values: ["low", "medium", "xhigh"] }],
+  });
+  expect(buildAihubmixModel(narrowed, undefined, aihubmixLabIDs)?.reasoning_options).toEqual([
+    { type: "effort", values: ["low", "medium", "xhigh"] },
+  ]);
+
+  const sixOfSeven = aihubmixModel({
+    ...standalone,
+    model_id: "gpt-5.6-sol",
+    model_name: "GPT-5.6 Sol",
+    reasoning_options: [
+      { type: "effort", values: ["none", "low", "medium", "high", "xhigh", "max"] },
+    ],
+  });
+  expect(buildAihubmixModel(sixOfSeven, undefined, aihubmixLabIDs)?.reasoning_options).toEqual([
+    { type: "effort", values: ["none", "low", "medium", "high", "xhigh", "max"] },
+  ]);
+});
+
 test("keeps only the AIHubMix routes canon covers", () => {
   // The model list says a route is reachable here; canon says what AIHubMix has
   // verified about the model behind it. A catalog entry needs the second, and
