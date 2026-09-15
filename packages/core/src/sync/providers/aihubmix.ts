@@ -113,6 +113,22 @@ const VENDOR_LABS: Record<string, string> = {
 // the one piece of the gateway's own vocabulary left here, and it covers 4 values
 // in the whole 409-route list (`no_think` 3, `instant` 1); both are reported
 // upstream, and the table goes when the endpoint spells them the catalog's way.
+/**
+ * Route variants the catalog does not carry. All three suffixes name a way into a
+ * model that is already listed under its own ID, not a model of its own:
+ * `-free` is the free-tier route (53 of them; 40 carry `variant_of` pointing at
+ * the paid route), and `-reasoning`/`-non-reasoning` are the pre-split Grok
+ * routes that reach one model with thinking forced on or off — a steering choice
+ * the catalog states as `reasoning_options`, not as two entries. Filtering here
+ * rather than at translate keeps them out of the missing-model issues too.
+ *
+ * Matched on the suffix, so `AiHubmix-Phi-4-mini-reasoning` — where the word is
+ * part of Microsoft's own model name — is caught as well. It writes no file today
+ * (the endpoint reports no `reasoning` flag and none of the standalone fields),
+ * so the filter costs nothing; give it an exception here if it ever should.
+ */
+const ROUTE_VARIANT_SUFFIX = /-(?:free|non-reasoning|reasoning)$/i;
+
 const EFFORT_ALIASES: Record<string, string> = { no_think: "none", instant: "minimal" };
 // Taken from the schema rather than restated, so a level added to the catalog is
 // accepted here without a second edit. `null` is deliberately not accepted: the
@@ -205,7 +221,12 @@ export const aihubmix = {
     // and would claim filenames that differ only in case. Keep the last entry
     // whole rather than mixing two records.
     relayCatalog = new Map(data.map((model) => [model.model_id.toLowerCase(), model]));
-    return [...relayCatalog.values()];
+    // Dropped here rather than in translateModel, so a route variant is absent
+    // from the sync altogether: no file, and no skip notice or missing-model
+    // issue asking a human to supply metadata the catalog does not want. The
+    // relay catalog above keeps every entry, because a variant is still a valid
+    // `variant_of` target for a route that does belong in the catalog.
+    return [...relayCatalog.values()].filter((model) => !ROUTE_VARIANT_SUFFIX.test(model.model_id));
   },
   translateModel(model, context) {
     const existing = context.existing(model.model_id);

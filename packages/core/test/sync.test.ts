@@ -5767,6 +5767,25 @@ test("marks retired AIHubMix relays deprecated and stops tracking them", () => {
   expect(aihubmix.sourceID?.(aihubmixModel())).toBe("gemini-3.1-flash-lite");
 });
 
+test("drops AIHubMix route variants before they reach the catalog", () => {
+  // `-free` is the free-tier route into a model already listed under its own ID,
+  // and `-reasoning`/`-non-reasoning` are the pre-split Grok routes that reach one
+  // model with thinking forced on or off — steering the catalog states as
+  // `reasoning_options`, not as two entries. parseModels drops them, so they raise
+  // no skip notice and no missing-model issue asking a human to fill them in.
+  const variants = [
+    aihubmixModel({ model_id: "coding-glm-5.1-free" }),
+    aihubmixModel({ model_id: "grok-4-fast-reasoning" }),
+    aihubmixModel({ model_id: "grok-4-fast-non-reasoning" }),
+    // The word is part of Microsoft's own model name here, and the suffix match
+    // catches it too. It writes no file today, so the filter costs nothing.
+    aihubmixModel({ model_id: "AiHubmix-Phi-4-mini-reasoning" }),
+  ];
+  const kept = aihubmixModel({ model_id: "glm-5.1" });
+  const parsed = aihubmix.parseModels({ data: [...variants, kept] });
+  expect(parsed.map((model) => model.model_id)).toEqual(["glm-5.1"]);
+});
+
 test("clears a stale AIHubMix deprecation when the route goes back to active", () => {
   // `retire_stage` rides on every route, so it is authoritative about retirement:
   // a relay that comes back has to lose the mark or the file carries `deprecated`
