@@ -265,11 +265,18 @@ export function buildAihubmixModel(
     ...(baseModalities?.output ?? []),
   ]);
   const features = new Set((model.features ?? "").split(",").map((value) => value.trim()));
-  // The endpoint never sends `false`. 107 of 408 routes omit `reasoning` and 100
-  // omit `tool_call` rather than denying them, and no route sends `false` at
-  // all, so a missing flag means unknown. Reading it as `false` would write an
-  // override that turns off a reasoner or tool use the lab declares.
-  const reasoning = model.reasoning ?? existing?.reasoning;
+  // `reasoning` states what this host exposes, so an omission is the catalog
+  // saying it exposes none: 108 of 409 routes omit the flag and none sends
+  // `false`. Reading an omission as unknown and inheriting the lab's `true`
+  // instead was what left six routes unwritable — the lab says the model
+  // reasons, the host publishes no controls for it, and AGENTS.md requires
+  // `reasoning_options` whenever `reasoning = true`, so the route could only be
+  // skipped. Nine routes resolve differently under this rule and none of them
+  // has a file today, so nothing already published flips.
+  //
+  // `tool_call` keeps the older reading: 100 routes omit it, and the endpoint
+  // models no way to deny tool use, so a missing flag there is still unknown.
+  const reasoning = model.reasoning ?? false;
   const toolCall = model.tool_call ?? existing?.tool_call;
   const structuredOutput = features.has("structured_outputs") || existing?.structured_output;
   const name = model.model_name ?? existing?.name;
@@ -311,7 +318,7 @@ export function buildAihubmixModel(
   };
 
   if (base !== undefined) {
-    assertReasoningOptions(model.model_id, reasoning ?? lab?.reasoning, shared.reasoning_options);
+    assertReasoningOptions(model.model_id, reasoning, shared.reasoning_options);
     return factorBaseModel(
       base,
       { name: factoredName(model, base, existing), description: existing?.description, ...shared },
@@ -347,10 +354,10 @@ export function buildAihubmixModel(
     return existing === undefined ? undefined : (existing as SyncedModel);
   }
 
-  // A standalone entry has no lab entry to inherit from, so the two flags have
-  // to resolve to a boolean here. Published reasoning options are the model's
-  // own statement that it reasons; absent both, the route is recorded as not.
-  const standaloneReasoning = reasoning ?? shared.reasoning_options !== undefined;
+  // Published reasoning options are the same catalog stating controls for a
+  // route whose flag it left off, and the specific statement wins over the
+  // omission. No route does both today, so this only keeps the pair coherent.
+  const standaloneReasoning = reasoning || shared.reasoning_options !== undefined;
   assertReasoningOptions(model.model_id, standaloneReasoning, shared.reasoning_options);
   const standaloneToolCall = toolCall ?? false;
   return {

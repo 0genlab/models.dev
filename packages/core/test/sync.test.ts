@@ -5534,16 +5534,18 @@ test("refreshes the AIHubMix wire path without discarding a human note", () => {
   expect(doubled.split(citation.trim()).length - 1).toBe(1);
 });
 
-test("reads a missing AIHubMix reasoning or tool flag as unknown, not as false", () => {
-  // 107 of 408 routes omit `reasoning` and 100 omit `tool_call`; none send
-  // `false`. A create must not write the omission as an override that turns off
-  // what the lab entry declares.
+test("reads a missing AIHubMix reasoning flag as false and a missing tool flag as unknown", () => {
+  // 108 of 409 routes omit `reasoning` and 100 omit `tool_call`; none send
+  // `false`. The flags diverge because the endpoint uses them differently:
+  // `reasoning` states the controls this host exposes, so leaving it off is the
+  // catalog saying it exposes none, while nothing in the endpoint denies tool
+  // use, so a missing `tool_call` is still unknown.
   const created = buildAihubmixModel(
     aihubmixModel({ input_modalities: "text,image,video,audio,pdf" }),
     undefined,
     aihubmixLabIDs,
   );
-  expect(created?.reasoning).toBeUndefined();
+  expect(created?.reasoning).toBe(false);
   expect(created?.tool_call).toBeUndefined();
 
   // An explicit boolean is still honoured.
@@ -5553,6 +5555,21 @@ test("reads a missing AIHubMix reasoning or tool flag as unknown, not as false",
     aihubmixLabIDs,
   );
   expect(denied?.tool_call).toBe(false);
+});
+
+test("writes an AIHubMix route the lab calls a reasoner but the host publishes no controls for", () => {
+  // The lab entry for a chat-tuned snapshot can say the model reasons while this
+  // host exposes no reasoning surface for it at all. Inheriting the lab's `true`
+  // made the route unwritable — AGENTS.md requires `reasoning_options` whenever
+  // `reasoning = true`, and the endpoint publishes none — so it was skipped
+  // rather than synced. The host's own omission settles it.
+  const written = buildAihubmixModel(
+    aihubmixModel({ model_id: "gpt-5.5", vendor: "openai", features: "", reasoning_options: null }),
+    undefined,
+    aihubmixLabIDs,
+  );
+  expect(written?.reasoning).toBe(false);
+  expect(written?.reasoning_options).toBeUndefined();
 });
 
 test("reads a zero AIHubMix limit as absent rather than a real ceiling", () => {
