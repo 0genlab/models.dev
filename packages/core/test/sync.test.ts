@@ -5228,6 +5228,10 @@ test("authors the AIHubMix toggle wire-path header so a rewrite cannot drop it",
     ...standalone,
     model_id: "somelab-plain",
     model_name: "SomeLab Plain",
+    // Spelled out because the fixture default publishes an effort row, and an
+    // effort row is a reasoning control like any other: it earns its own wire
+    // path. Bare means the response states no control at all.
+    reasoning_options: null,
   });
   aihubmix.parseModels({ data: [toggled, plain] });
 
@@ -5253,6 +5257,69 @@ test("authors the AIHubMix toggle wire-path header so a rewrite cannot drop it",
   const dropped = aihubmix.translateModel(folded, context);
   expect(dropped?.model.reasoning_options).toEqual([{ type: "effort", values: ["none", "high"] }]);
   expect(dropped?.header).toStartWith("# Off is effort=none");
+});
+
+test("authors an AIHubMix wire path for every reasoning control, not just the toggle", () => {
+  // The openings `# Effort:` and `# Budget:` are stripped on a rewrite because
+  // the derived block restates them. It only restated the toggle, so an effort or
+  // budget row kept its option on the file and lost its field name entirely --
+  // `deepseek-v4-pro-0813` and `qwen3.7-flash` both carried one by hand.
+  const standalone = {
+    vendor: null,
+    release_date: "2026-05-01",
+    open_weights: false,
+    context_length: 262_144,
+    max_output: 65_536,
+  } satisfies Partial<AihubmixModel>;
+  const graded = aihubmixModel({
+    ...standalone,
+    model_id: "somelab-graded",
+    model_name: "SomeLab Graded",
+    reasoning: true,
+    reasoning_options: [
+      { type: "toggle" },
+      { type: "effort", values: ["high", "max"] },
+      { type: "budget_tokens", max: 262_144 },
+    ] as AihubmixModel["reasoning_options"],
+  });
+  aihubmix.parseModels({ data: [graded] });
+  const translated = aihubmix.translateModel(graded, {
+    existing: () => undefined,
+    authored: () => undefined,
+    header: () =>
+      "# Toggle: enable_thinking = true|false\n" +
+      "# Effort: reasoning_effort = high|max\n" +
+      "# Budget: thinking_budget = integer reasoning tokens\n",
+  });
+  const header = translated?.header ?? "";
+  expect(header).toContain("# Toggle:\n# $.enable_thinking = true|false");
+  expect(header).toContain("# Effort: high|max\n# $.reasoning_effort on /v1/chat/completions");
+  expect(header).toContain("# Budget:\n# integer $.reasoning.max_tokens on /v1/chat/completions");
+  // Each hand-written opening is superseded rather than kept beside its replacement.
+  expect(header).not.toContain("# Effort: reasoning_effort =");
+  expect(header).not.toContain("# Budget: thinking_budget");
+
+  // The levels are read off the row they document, so the two cannot drift.
+  expect(header).not.toContain("# Effort: none");
+
+  // A control the file does not author gets no wire path: a budget-free model
+  // must not advertise a budget field.
+  const effortOnly = aihubmixModel({
+    ...standalone,
+    model_id: "somelab-effort-only",
+    model_name: "SomeLab Effort Only",
+    reasoning: true,
+    reasoning_options: [{ type: "effort", values: ["high", "max"] }] as AihubmixModel["reasoning_options"],
+  });
+  aihubmix.parseModels({ data: [effortOnly] });
+  const bare = aihubmix.translateModel(effortOnly, {
+    existing: () => undefined,
+    authored: () => undefined,
+    header: () => undefined,
+  })?.header ?? "";
+  expect(bare).toContain("# Effort: high|max");
+  expect(bare).not.toContain("# Budget:");
+  expect(bare).not.toContain("# Toggle:");
 });
 
 test("keeps AIHubMix audio and reasoning prices the endpoint never quotes", () => {
@@ -5475,6 +5542,10 @@ test("refreshes the AIHubMix wire path without discarding a human note", () => {
     open_weights: false,
     context_length: 262_144,
     max_output: 65_536,
+    // Bare is the point here: the fixture default publishes an effort row, which
+    // derives a block of its own and would leave nothing for the citation to be
+    // the only line of.
+    reasoning_options: null,
   });
   aihubmix.parseModels({ data: [toggled, plain] });
   const translated = aihubmix.translateModel(toggled, {
@@ -5770,21 +5841,60 @@ test("marks retired AIHubMix relays deprecated and stops tracking them", () => {
 
 test("drops AIHubMix route variants before they reach the catalog", () => {
   // `-free` is the free-tier route into a model already listed under its own ID,
-  // and `-reasoning`/`-non-reasoning` are the pre-split Grok routes that reach one
+  // `-reasoning`/`-non-reasoning` are the pre-split Grok routes that reach one
   // model with thinking forced on or off — steering the catalog states as
-  // `reasoning_options`, not as two entries. parseModels drops them, so they raise
-  // no skip notice and no missing-model issue asking a human to fill them in.
+  // `reasoning_options`, not as two entries — and `coding-` is the discounted
+  // coding-agent route into a model listed plainly as well. parseModels drops
+  // them, so they raise no skip notice and no missing-model issue asking a human
+  // to fill them in.
   const variants = [
     aihubmixModel({ model_id: "coding-glm-5.1-free" }),
     aihubmixModel({ model_id: "grok-4-fast-reasoning" }),
     aihubmixModel({ model_id: "grok-4-fast-non-reasoning" }),
-    // The word is part of Microsoft's own model name here, and the suffix match
-    // catches it too. It writes no file today, so the filter costs nothing.
-    aihubmixModel({ model_id: "AiHubmix-Phi-4-mini-reasoning" }),
+    // The prefix is dropped whether or not the endpoint backfilled the pointer:
+    // 8 of the 19 paid `coding-` routes carry no `variant_of` yet.
+    aihubmixModel({ model_id: "coding-minimax-m2.7", variant_of: "minimax-m2.7" }),
+    aihubmixModel({ model_id: "coding-glm-5.1" }),
   ];
   const kept = aihubmixModel({ model_id: "glm-5.1" });
   const parsed = aihubmix.parseModels({ data: [...variants, kept] });
   expect(parsed.map((model) => model.model_id)).toEqual(["glm-5.1"]);
+
+  // Anchored at the front, so a lab that uses the word mid-ID keeps its entry.
+  const midword = aihubmixModel({ model_id: "qwen3-coding-plus" });
+  expect(aihubmix.parseModels({ data: [midword] }).map((model) => model.model_id)).toEqual([
+    "qwen3-coding-plus",
+  ]);
+});
+
+test("reads a steering pair from the AIHubMix list rather than the word `reasoning`", () => {
+  // A lab can end a model's real name with the word: `AiHubmix-Phi-4-mini-reasoning`
+  // is Microsoft's, cataloged here as `providers/azure/models/phi-4-mini-reasoning.toml`.
+  // What makes the Grok routes steering is that the list carries both halves, so
+  // the pairing is the test — no allowlist to keep current as routes come and go.
+  const unpaired = [
+    aihubmixModel({ model_id: "AiHubmix-Phi-4-mini-reasoning" }),
+    aihubmixModel({ model_id: "glm-5.1" }),
+  ];
+  expect(aihubmix.parseModels({ data: unpaired }).map((model) => model.model_id)).toEqual([
+    "AiHubmix-Phi-4-mini-reasoning",
+    "glm-5.1",
+  ]);
+
+  // Its off half listed alongside it, and the same ID is steering after all.
+  const paired = [
+    aihubmixModel({ model_id: "AiHubmix-Phi-4-mini-reasoning" }),
+    aihubmixModel({ model_id: "AiHubmix-Phi-4-mini-non-reasoning" }),
+    aihubmixModel({ model_id: "glm-5.1" }),
+  ];
+  expect(aihubmix.parseModels({ data: paired }).map((model) => model.model_id)).toEqual(["glm-5.1"]);
+
+  // The off half goes on its own name, paired or not: nothing else ends that way.
+  const offOnly = [
+    aihubmixModel({ model_id: "grok-4-fast-non-reasoning" }),
+    aihubmixModel({ model_id: "glm-5.1" }),
+  ];
+  expect(aihubmix.parseModels({ data: offOnly }).map((model) => model.model_id)).toEqual(["glm-5.1"]);
 });
 
 test("keeps only the AIHubMix routes canon covers", () => {

@@ -121,20 +121,38 @@ const VENDOR_LABS: Record<string, string> = {
 // in the whole 409-route list (`no_think` 3, `instant` 1); both are reported
 // upstream, and the table goes when the endpoint spells them the catalog's way.
 /**
- * Route variants the catalog does not carry. All three suffixes name a way into a
- * model that is already listed under its own ID, not a model of its own:
- * `-free` is the free-tier route (53 of them; 40 carry `variant_of` pointing at
- * the paid route), and `-reasoning`/`-non-reasoning` are the pre-split Grok
- * routes that reach one model with thinking forced on or off — a steering choice
- * the catalog states as `reasoning_options`, not as two entries. Filtering here
- * rather than at translate keeps them out of the missing-model issues too.
+ * Route variants the catalog does not carry. Every one of these affixes names a
+ * way into a model that is already listed under its own ID, not a model of its
+ * own: `-free` is the free-tier route (53 of them; 40 carry `variant_of` pointing
+ * at the paid route), `-reasoning`/`-non-reasoning` are the pre-split Grok routes
+ * that reach one model with thinking forced on or off — a steering choice the
+ * catalog states as `reasoning_options`, not as two entries — and `coding-` is
+ * the discounted coding-agent route (32 of them; 19 once the `-free` overlap is
+ * removed, of which 11 say so through `variant_of` and 8 are the same shape with
+ * the pointer not yet backfilled). Filtering here rather than at translate keeps
+ * them out of the missing-model issues too.
  *
- * Matched on the suffix, so `AiHubmix-Phi-4-mini-reasoning` — where the word is
- * part of Microsoft's own model name — is caught as well. It writes no file today
- * (the endpoint reports no `reasoning` flag and none of the standalone fields),
- * so the filter costs nothing; give it an exception here if it ever should.
+ * A route variant reprices the model, which is exactly what `-free` does too, so
+ * repricing is not what makes an entry its own model. Every `coding-` route's
+ * plain sibling is listed and syncs a file of its own, bar `minimax-m2.7-highspeed`
+ * — reached through `cc-`/`mm-` routes instead — and the two `mimo-v2-*` entries
+ * the endpoint under-describes today, so nothing loses its only card here.
+ *
+ * `-reasoning` is the one affix the gateway does not own outright: a lab can end
+ * a model's real name with it, and `AiHubmix-Phi-4-mini-reasoning` is Microsoft's
+ * — cataloged here as `providers/azure/models/phi-4-mini-reasoning.toml`. What
+ * makes the Grok routes a steering pair is that they come as a pair, so
+ * `isRouteVariant` asks the catalog for the `-non-reasoning` half rather than
+ * trusting the word. That reads the same list every other rule here reads, so it
+ * needs no allowlist to keep current.
  */
-const ROUTE_VARIANT_SUFFIX = /-(?:free|non-reasoning|reasoning)$/i;
+const ROUTE_VARIANT_ID = /^coding-|-(?:free|non-reasoning)$/i;
+const STEERING_ON = /-reasoning$/i;
+
+function isRouteVariant(id: string, catalog: RelayCatalog) {
+  if (ROUTE_VARIANT_ID.test(id)) return true;
+  return STEERING_ON.test(id) && catalog.has(id.toLowerCase().replace(STEERING_ON, "-non-reasoning"));
+}
 
 const EFFORT_ALIASES: Record<string, string> = { no_think: "none", instant: "minimal" };
 // Taken from the schema rather than restated, so a level added to the catalog is
@@ -194,21 +212,32 @@ async function readLabMetadataIDs(modelsDir: string) {
   return ids;
 }
 
-// The same off state is reachable from whichever dialect the caller speaks, so
-// an off switch has no single wire path. Name one per protocol.
-const DIALECT_PATHS =
-  '# $.enable_thinking = true|false on the OpenAI-compatible /v1/chat/completions path (verified live 2026-09-11);\n' +
+// A control on this gateway has no single wire path: the same off state, the
+// same effort, the same budget are each reachable from whichever SDK dialect the
+// caller speaks, and the gateway maps whatever it receives onto the vendor's real
+// field. So a control names one path per protocol rather than picking a winner,
+// following what `providers/aihubmix/provider.toml` records for each surface.
+const TOGGLE_PATHS =
+  "# $.enable_thinking = true|false on the OpenAI-compatible /v1/chat/completions path (verified live 2026-09-11);\n" +
   '# $.thinking.type = "enabled"|"disabled"|"adaptive" on /v1/messages; $.generationConfig.thinkingConfig on the Gemini path.\n';
+const EFFORT_PATHS =
+  "# $.reasoning_effort on /v1/chat/completions (alias $.reasoning.effort, which is also the Responses field);\n" +
+  "# $.output_config.effort on /v1/messages, subject to model support.\n";
+const BUDGET_PATHS =
+  "# integer $.reasoning.max_tokens on /v1/chat/completions; $.thinking.budget_tokens >= 1024 on /v1/messages;\n" +
+  "# integer $.generationConfig.thinkingConfig.thinkingBudget on the Gemini path (-1 dynamic, 0 off where supported);\n" +
+  "# the Responses path carries effort but has no reasoning-token budget field.\n";
+// Every path line above is this adapter's own restatement of the block, so a
+// hand-written copy of one is dropped rather than kept beside it.
+const ADAPTER_PATHS = TOGGLE_PATHS + EFFORT_PATHS + BUDGET_PATHS;
 // Cited on its own line, because a human wrote this exact line by hand in
 // `gemini-3.7-flash.toml` — it is a source for the whole gateway, not a claim
 // about one model's options, and so it is carried through as a note rather than
-// being owned by the block. The two lines above are only ever this adapter's own.
+// being owned by the block. The path lines above are only ever this adapter's own.
 const DIALECT_SOURCE = "# https://docs.aihubmix.com/cn/api/unified-inference\n";
-const DIALECTS = DIALECT_PATHS + DIALECT_SOURCE;
-const TOGGLE_HEADER = "# Toggle:\n" + DIALECTS;
 // Where the catalog spells the off state as `effort = none`, the other dialects
 // still reach it, and the folded toggle is the only place that was recorded.
-const FOLDED_HEADER = "# Off is effort=none; graded levels — no toggle. The same off elsewhere:\n" + DIALECTS;
+const FOLDED_OPENING = "# Off is effort=none; graded levels — no toggle. The same off elsewhere:\n";
 
 export const aihubmix = {
   id: "aihubmix",
@@ -269,8 +298,11 @@ export const aihubmix = {
     // issue asking a human to supply metadata the catalog does not want. The
     // relay catalog above keeps every entry, because a variant is still a valid
     // `variant_of` target for a route that does belong in the catalog.
-    const listed = [...relayCatalog.values()].filter(
-      (model) => !ROUTE_VARIANT_SUFFIX.test(model.model_id),
+    // Bound locally because the pairing rule reads the catalog from inside a
+    // closure, where the module-level binding is no longer narrowed.
+    const catalog = relayCatalog;
+    const listed = [...catalog.values()].filter(
+      (model) => !isRouteVariant(model.model_id, catalog),
     );
     // Dropped silently for the same reason: an uncovered route is not a gap in
     // this repo that a contributor here can close — the work is to verify the
@@ -567,8 +599,8 @@ function factoredName(model: AihubmixModel, base: string, existing: ExistingMode
 const AUTHORED_OPENING = /^#\s*(Toggle|Effort|Budget|Off is effort)\b/;
 
 function composeHeader(existingHeader: string | undefined, derived: string | undefined) {
-  // The two wire-path lines are this adapter's own restatement of the block, so
-  // they go whether or not a block replaces them. Keeping them when nothing is
+  // The wire-path lines are this adapter's own restatement of the block, so they
+  // go whether or not a block replaces them. Keeping them when nothing is
   // derived is what left a route advertising a toggle it no longer has: the block
   // vanished, its tail survived as a "note", and no later sync could tell the
   // difference — the file never self-corrected.
@@ -577,7 +609,7 @@ function composeHeader(existingHeader: string | undefined, derived: string | und
   // avoid stating it twice. It is a citation for the gateway rather than a claim
   // about this model, and a human wrote this exact line in `gemini-3.7-flash`.
   const authored = new Set(
-    (derived === undefined ? DIALECT_PATHS : DIALECTS)
+    (derived === undefined ? ADAPTER_PATHS : ADAPTER_PATHS + DIALECT_SOURCE)
       .split("\n")
       .map((line) => line.trim())
       .filter((line) => line !== ""),
@@ -591,15 +623,38 @@ function composeHeader(existingHeader: string | undefined, derived: string | und
   return header === "" ? undefined : header;
 }
 
+/**
+ * One block per control the file actually authors, so a wire path is documented
+ * exactly while its option row is on the file and disappears with it. Deriving
+ * every type — rather than the toggle alone — is what makes `AUTHORED_OPENING`
+ * honest: an opening is only disposable because the block restates it, and an
+ * effort or budget opening used to be stripped with nothing put back, leaving the
+ * option row on the file and its field name nowhere.
+ */
 function reasoningHeader(model: AihubmixModel, built: SyncedModel) {
   const options = built.reasoning_options;
   if (options === undefined) return undefined;
-  if (options.some((option) => option.type === "toggle")) return TOGGLE_HEADER;
-  // Only say where the off state moved to on a file that actually spells it out.
-  return options.some((option) => option.type === "effort" && option.values?.includes("none")) &&
+  const effort = options.find((option) => option.type === "effort");
+  const blocks: string[] = [];
+  if (options.some((option) => option.type === "toggle")) {
+    blocks.push("# Toggle:\n" + TOGGLE_PATHS);
+  } else if (
+    // Only say where the off state moved to on a file that actually spells it out.
+    effort?.values.includes("none") &&
     (model.reasoning_options ?? []).some((option) => option.type === "toggle")
-    ? FOLDED_HEADER
-    : undefined;
+  ) {
+    blocks.push(FOLDED_OPENING + TOGGLE_PATHS);
+  }
+  if (effort !== undefined) {
+    // The levels come from the row they document, so a file never states a set
+    // the row does not carry — the drift the hand-written openings had.
+    const levels = effort.values.length > 0 ? ` ${effort.values.join("|")}` : "";
+    blocks.push(`# Effort:${levels}\n` + EFFORT_PATHS);
+  }
+  if (options.some((option) => option.type === "budget_tokens")) {
+    blocks.push("# Budget:\n" + BUDGET_PATHS);
+  }
+  return blocks.length === 0 ? undefined : blocks.join("") + DIALECT_SOURCE;
 }
 
 /**
