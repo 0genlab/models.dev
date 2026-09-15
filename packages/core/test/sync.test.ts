@@ -8,6 +8,7 @@ import { MissingReasoningOptionsError } from "../src/sync/missing-reasoning-opti
 import {
   aihubmix,
   buildAihubmixModel,
+  canonCoveredModels,
   type AihubmixModel,
 } from "../src/sync/providers/aihubmix.js";
 import {
@@ -5784,6 +5785,29 @@ test("drops AIHubMix route variants before they reach the catalog", () => {
   const kept = aihubmixModel({ model_id: "glm-5.1" });
   const parsed = aihubmix.parseModels({ data: [...variants, kept] });
   expect(parsed.map((model) => model.model_id)).toEqual(["glm-5.1"]);
+});
+
+test("keeps only the AIHubMix routes canon covers", () => {
+  // The model list says a route is reachable here; canon says what AIHubMix has
+  // verified about the model behind it. A catalog entry needs the second, and
+  // the routes canon leaves out are the ones the list describes worst —
+  // `Qwen/QwQ-32B` has no non-thinking mode yet carries no `reasoning` flag.
+  const listed = [
+    aihubmixModel({ model_id: "glm-5.1" }),
+    aihubmixModel({ model_id: "Qwen/QwQ-32B" }),
+    aihubmixModel({ model_id: "qwen3-14b" }),
+  ];
+  const covered = canonCoveredModels(listed, new Set(["glm-5.1"]));
+  expect(covered.map((model) => model.model_id)).toEqual(["glm-5.1"]);
+
+  // Compared exactly: both registries are generated from the same gateway
+  // catalog, so folding case would only invent matches the gateway does not make.
+  expect(canonCoveredModels(listed, new Set(["qwen/qwq-32b"]))).toEqual([]);
+
+  // Unset only when parseModels is driven directly, as the tests above do.
+  // fetchModels throws rather than returning with canon unfetched, so a real
+  // sync never reaches the filter without it.
+  expect(canonCoveredModels(listed, undefined)).toHaveLength(3);
 });
 
 test("clears a stale AIHubMix deprecation when the route goes back to active", () => {

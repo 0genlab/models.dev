@@ -9,6 +9,13 @@ import { MissingReasoningOptionsError } from "../missing-reasoning-options.js";
 import { factorBaseModel, modelMetadata, normalizeModelSlug } from "./openrouter.js";
 
 const API_ENDPOINT = "https://aihubmix.com/api/v1/models?type=llm";
+/**
+ * The gateway's second published interface: the canon projection, which is the
+ * set of models AIHubMix has actually verified rather than merely routes. The
+ * model list answers "can you reach it here", canon answers "is what we say
+ * about it checked", and a catalog entry needs the second.
+ */
+const CANON_ENDPOINT = "https://aihubmix.com/model-data/index.json";
 
 /** AIHubMix quotes USD per 1M tokens directly, matching the catalog unit. */
 const Pricing = z
@@ -137,12 +144,39 @@ const EFFORT_ALIASES: Record<string, string> = { no_think: "none", instant: "min
 // nothing where it means nothing, which the filter below already drops.
 const EFFORT_VALUES = new Set<string>(REASONING_EFFORT_VALUES);
 
+/**
+ * Only the IDs are read. The projection carries the resolved parameter domains
+ * too, but reading those here would make the adapter answer to two sources for
+ * the same field; the model list stays the one voice on what a route is, and
+ * canon is asked one question — is this model covered.
+ */
+const CanonIndex = z
+  .object({ models: z.array(z.object({ id: z.string() }).passthrough()) })
+  .passthrough();
+
 type LabMetadataIDs = Map<string, string>;
 /** Every listed relay by lowercased ID, so `variant_of` can be followed. */
 type RelayCatalog = Map<string, AihubmixModel>;
 
 let labMetadataIDs: LabMetadataIDs | undefined;
 let relayCatalog: RelayCatalog | undefined;
+let canonIDs: Set<string> | undefined;
+
+/**
+ * Routes canon covers. IDs are compared exactly: both registries are generated
+ * from the same gateway catalog, and all 292 of today's overlaps match without
+ * case folding, so folding would only invent matches the gateway does not make.
+ */
+export function canonCoveredModels<T extends { model_id: string }>(
+  models: T[],
+  covered: Set<string> | undefined,
+) {
+  // Left unset only when `parseModels` is driven directly, as the tests do:
+  // `fetchModels` throws rather than returning with canon unfetched, so a real
+  // sync never reaches the filter without it.
+  if (covered === undefined) return models;
+  return models.filter((model) => covered.has(model.model_id));
+}
 
 /**
  * The catalog rejects a `base_model` that resolves to nothing, so relays are
@@ -213,6 +247,15 @@ export const aihubmix = {
     if (!response.ok) {
       throw new Error(`AIHubMix models request failed: ${response.status} ${response.statusText}`);
     }
+    // Thrown rather than skipped, because a canon request that fails is not a
+    // catalog with nothing in it — carrying on without the gate would publish
+    // exactly the unverified routes it exists to hold back, and the sync writes
+    // nothing on a throw, so a bad fetch costs a rerun instead of a bad write.
+    const canon = await fetch(process.env.AIHUBMIX_CANON_URL ?? CANON_ENDPOINT);
+    if (!canon.ok) {
+      throw new Error(`AIHubMix canon request failed: ${canon.status} ${canon.statusText}`);
+    }
+    canonIDs = new Set(CanonIndex.parse(await canon.json()).models.map((model) => model.id));
     return response.json();
   },
   parseModels(raw) {
@@ -226,7 +269,17 @@ export const aihubmix = {
     // issue asking a human to supply metadata the catalog does not want. The
     // relay catalog above keeps every entry, because a variant is still a valid
     // `variant_of` target for a route that does belong in the catalog.
-    return [...relayCatalog.values()].filter((model) => !ROUTE_VARIANT_SUFFIX.test(model.model_id));
+    const listed = [...relayCatalog.values()].filter(
+      (model) => !ROUTE_VARIANT_SUFFIX.test(model.model_id),
+    );
+    // Dropped silently for the same reason: an uncovered route is not a gap in
+    // this repo that a contributor here can close — the work is to verify the
+    // model in canon — so it raises nothing for a maintainer to act on. Of the
+    // 117 routes canon does not cover, the ones that would otherwise reach a
+    // file are the long tail the endpoint describes worst: `Qwen/QwQ-32B`,
+    // `codex-mini-latest` and the `qwen3-*` family all report no `reasoning`
+    // flag despite having no non-thinking mode.
+    return canonCoveredModels(listed, canonIDs);
   },
   translateModel(model, context) {
     const existing = context.existing(model.model_id);
