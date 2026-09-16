@@ -9,6 +9,7 @@ import {
   aihubmix,
   buildAihubmixModel,
   canonCoveredModels,
+  wireProtocol,
   type AihubmixModel,
 } from "../src/sync/providers/aihubmix.js";
 import {
@@ -6040,6 +6041,134 @@ test("skips an AIHubMix reasoner that publishes no reasoning options", () => {
 
   // A route that publishes its controls is untouched by any of this.
   expect(buildAihubmixModel(aihubmixModel(), undefined, aihubmixLabIDs)).toBeDefined();
+});
+
+/** The base fixture only names Google and OpenAI labs; these reach the other two faces. */
+const interleavedLabIDs = new Map([
+  ...aihubmixLabIDs,
+  ["anthropic/claude-opus-4-8", "anthropic/claude-opus-4-8"],
+  ["moonshotai/kimi-k2.5", "moonshotai/Kimi-K2.5"],
+]);
+
+test("routes an AIHubMix model to the protocol its provider package actually speaks", () => {
+  // `@aihubmix/ai-sdk-provider` picks the wire protocol from the model ID rather
+  // than once for the provider, so a catalog entry describes whichever of the
+  // four protocols that ID lands on.
+  expect(wireProtocol("claude-opus-4-8-think")).toBe("anthropic.messages");
+  expect(wireProtocol("gemini-3.1-flash-lite")).toBe("google.gemini");
+  expect(wireProtocol("imagen-4")).toBe("google.gemini");
+  // The provider sends these two Gemini routing modes back down the
+  // OpenAI-compatible path, so the Gemini prefix is not the whole rule.
+  expect(wireProtocol("gemini-3.1-flash-lite-nothink")).toBe("openai.chat_completions");
+  expect(wireProtocol("gemini-3.1-pro-search")).toBe("openai.chat_completions");
+  expect(wireProtocol("deepseek-v4-pro-0813")).toBe("openai.chat_completions");
+  // The Responses face is reachable only by asking for it, so it is never the
+  // default a catalog entry describes — `gpt-5-codex` still routes to chat.
+  expect(wireProtocol("gpt-5-codex")).toBe("openai.chat_completions");
+});
+
+test("reads the AIHubMix reasoning side channel on the protocol the model is spoken over", () => {
+  const named = buildAihubmixModel(
+    aihubmixModel({
+      model_id: "gpt-5.5",
+      vendor: "openai",
+      interleaved: { "openai.chat_completions": { field: "reasoning_content" } },
+    }),
+    undefined,
+    aihubmixLabIDs,
+  );
+  expect(named?.interleaved).toEqual({ field: "reasoning_content" });
+
+  // The carrier is a property of the protocol shape, so a face this model is not
+  // spoken over says nothing about the one it is: `claude-*` goes to
+  // `/v1/messages`, where the channel exists but has no settled field name, and
+  // reading the chat face here would publish a carrier that path never uses.
+  const claude = buildAihubmixModel(
+    aihubmixModel({
+      model_id: "claude-opus-4-8",
+      vendor: "anthropic",
+      interleaved: {
+        "anthropic.messages": true,
+        "openai.chat_completions": { field: "reasoning_content" },
+      },
+    }),
+    {
+      ...aihubmixAuthored,
+      id: "claude-opus-4-8",
+      base_model: "anthropic/claude-opus-4-8",
+      interleaved: { field: "reasoning_content" },
+    },
+    interleavedLabIDs,
+  );
+  expect(claude?.interleaved).toBe(true);
+});
+
+test("leaves an authored AIHubMix side channel standing where the endpoint is silent", () => {
+  // Absence is unknown rather than denial — `kimi-k2.5` is in canon with no
+  // reasoning-content entry researched — so it gets the same reading the missing
+  // `reasoning` flag gets and the file answers for it.
+  const authored: ExistingModel = {
+    ...aihubmixAuthored,
+    id: "kimi-k2.5",
+    base_model: "moonshotai/Kimi-K2.5",
+    interleaved: { field: "reasoning_content" },
+  };
+  const silent = buildAihubmixModel(
+    aihubmixModel({ model_id: "kimi-k2.5", vendor: "moonshot" }),
+    authored,
+    interleavedLabIDs,
+  );
+  expect(silent?.interleaved).toEqual({ field: "reasoning_content" });
+
+  // A face the endpoint does describe, just not this model's, is no less silent
+  // about this model.
+  const otherFace = buildAihubmixModel(
+    aihubmixModel({
+      model_id: "kimi-k2.5",
+      vendor: "moonshot",
+      interleaved: { "anthropic.messages": true },
+    }),
+    authored,
+    interleavedLabIDs,
+  );
+  expect(otherFace?.interleaved).toEqual({ field: "reasoning_content" });
+
+  // With nothing authored either, the file says nothing rather than saying no.
+  const unknown = buildAihubmixModel(
+    aihubmixModel({ model_id: "kimi-k2.5", vendor: "moonshot" }),
+    undefined,
+    interleavedLabIDs,
+  );
+  expect(unknown).toBeDefined();
+  expect(unknown?.interleaved).toBeUndefined();
+});
+
+test("keeps an AIHubMix side channel the catalog has no name for", () => {
+  // The catalog names two carriers. A third would fail its schema, and dropping
+  // the channel to avoid that would state the model has none — so the channel is
+  // published without the name.
+  const model = buildAihubmixModel(
+    aihubmixModel({
+      model_id: "gpt-5.5",
+      vendor: "openai",
+      interleaved: { "openai.chat_completions": { field: "thinking_text" } },
+    }),
+    undefined,
+    aihubmixLabIDs,
+  );
+  expect(model?.interleaved).toBe(true);
+
+  // `reasoning_details` is the other name it does have.
+  const details = buildAihubmixModel(
+    aihubmixModel({
+      model_id: "gpt-5.5",
+      vendor: "openai",
+      interleaved: { "openai.chat_completions": { field: "reasoning_details" } },
+    }),
+    undefined,
+    aihubmixLabIDs,
+  );
+  expect(details?.interleaved).toEqual({ field: "reasoning_details" });
 });
 
 test("writes per-tier audio pricing", () => {

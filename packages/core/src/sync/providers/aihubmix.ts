@@ -81,6 +81,11 @@ export const AihubmixModel = z
     // code change once AIHubMix adds it.
     knowledge: z.string().nullish(),
     open_weights: z.boolean().nullish(),
+    // Which field carries reasoning back, stated per wire protocol rather than
+    // once for the route. See `interleavedFor` for why the protocol is the unit.
+    interleaved: z
+      .record(z.union([z.literal(true), z.object({ field: z.string() }).passthrough()]))
+      .nullish(),
     retire_stage: z.string().nullish(),
   })
   .passthrough();
@@ -416,10 +421,10 @@ export function buildAihubmixModel(
     reasoning_options: reasoningOptions(model, existing) ?? existing?.reasoning_options,
     tool_call: toolCall,
     structured_output: structuredOutput,
-    // AIHubMix serves no temperature, interleaved, fast-mode or request-shape
-    // surface; all four exist on the file and nowhere else, so keep them.
+    // AIHubMix serves no temperature, fast-mode or request-shape surface; those
+    // three exist on the file and nowhere else, so keep them.
     temperature: existing?.temperature,
-    interleaved: existing?.interleaved,
+    interleaved: interleavedFor(model, existing),
     experimental: existing?.experimental,
     provider: existing?.provider,
     status: resolveStatus(model.retire_stage, existing?.status),
@@ -535,6 +540,64 @@ function relayChain(model: AihubmixModel, catalog: RelayCatalog | undefined) {
 
 function bareID(modelID: string) {
   return modelID.split("/").at(-1) ?? modelID;
+}
+
+/**
+ * Which wire protocol a model is actually spoken over. AIHubMix relays one route
+ * list across four protocols, and `@aihubmix/ai-sdk-provider` — the package this
+ * provider entry names — picks between them from the model ID: `claude-*` is
+ * built as an Anthropic messages model, `gemini*`/`imagen*` as a Google
+ * generative model (except the `-nothink`/`-search` routes, which the provider
+ * sends back down the OpenAI-compatible path), and everything else as an
+ * OpenAI-compatible chat model. Rules transcribed from `createChatModel` in
+ * aihubmix-provider.ts (v2.2.1). The Responses face is reachable only by asking
+ * for it (`provider.responses(id)`), so it is never the default a catalog entry
+ * describes.
+ *
+ * This matters because the reasoning side channel is a property of the protocol
+ * shape, not of the model: `claude-opus-5` returns thinking blocks on
+ * `/v1/messages` and nothing at all on the chat-completions path. Reading one
+ * fixed protocol for every route would answer for the wrong endpoint — the same
+ * mistake, in the same direction, that reading `chat_completions` for the
+ * Gemini-native routes would make for tool calling.
+ */
+const GOOGLE_NATIVE_EXCLUDED = ["-nothink", "-search"];
+
+export function wireProtocol(modelID: string): string {
+  if (modelID.startsWith("claude")) return "anthropic.messages";
+  if (
+    (modelID.startsWith("gemini") || modelID.startsWith("imagen")) &&
+    !GOOGLE_NATIVE_EXCLUDED.some((suffix) => modelID.endsWith(suffix))
+  ) {
+    return "google.gemini";
+  }
+  return "openai.chat_completions";
+}
+
+/** The two side-channel fields the catalog names; anything else is not one. */
+const INTERLEAVED_FIELDS = new Set(["reasoning_content", "reasoning_details"]);
+
+/**
+ * The reasoning side channel on the protocol this model is actually spoken over.
+ *
+ * The endpoint states this per protocol — `true` where the channel exists but the
+ * carrier has no settled name, `{field}` where it does — and states nothing at
+ * all for a model whose channel has not been checked. Absence is therefore
+ * unknown rather than denial, the same reading the route list's missing
+ * `reasoning` flag gets, so a silent endpoint leaves an authored value standing.
+ * A protocol the endpoint does describe is authoritative for that protocol,
+ * which is what corrects a file naming a carrier the protocol does not use.
+ */
+function interleavedFor(
+  model: AihubmixModel,
+  existing?: ExistingModel,
+): SyncedFullModel["interleaved"] {
+  const served = model.interleaved?.[wireProtocol(model.model_id)];
+  if (served === undefined) return existing?.interleaved;
+  if (served === true) return true;
+  return INTERLEAVED_FIELDS.has(served.field)
+    ? { field: served.field as "reasoning_content" | "reasoning_details" }
+    : true;
 }
 
 function reasoningOptions(
