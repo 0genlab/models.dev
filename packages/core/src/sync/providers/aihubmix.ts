@@ -134,9 +134,17 @@ const VENDOR_LABS: Record<string, string> = {
  *
  * A route variant reprices the model, which is exactly what `-free` does too, so
  * repricing is not what makes an entry its own model. Every `coding-` route's
- * plain sibling is listed and syncs a file of its own, bar `minimax-m2.7-highspeed`
- * — reached through `cc-`/`mm-` routes instead — and the two `mimo-v2-*` entries
- * the endpoint under-describes today, so nothing loses its only card here.
+ * plain sibling is listed and syncs a file of its own. `minimax-m2.7-highspeed`
+ * is the one reached under other prefixes: `cc-minimax-m2.7-highspeed` and
+ * `mm-minimax-m2.7-highspeed` are both listed, match no affix here, and declare
+ * `variant_of = minimax-m2.7-highspeed`, which resolves to the lab entry
+ * `models/minimax/MiniMax-M2.7-highspeed.toml` — so a sync writes each of them a
+ * card and what the filter drops is the `coding-` price point, not the model. The
+ * MiMo V2.5 pair reads the same way: the list spells them `mimo-v2.5` and
+ * `mimo-v2.5-pro` with no `xiaomi-` prefix, so deleting the `xiaomi-`/`coding-`
+ * spellings costs nothing a sync does not write back. The one pair that does go
+ * uncarded is `mimo-v2-omni`/`mimo-v2-pro`, listed as reasoning while publishing
+ * no `reasoning_options` and skipped for that reason rather than by this filter.
  *
  * `-reasoning` is the one affix the gateway does not own outright: a lab can end
  * a model's real name with it, and `AiHubmix-Phi-4-mini-reasoning` is Microsoft's
