@@ -1,0 +1,14 @@
+# Pricing, context window, max output and reasoning controls:
+# https://aihubmix.com/api/v1/models?type=llm (accessed 2026-09-18)
+# Cache read is a quarter of Claude Fable 5's rate; input, output and cache
+# write are unchanged from it, matching the sibling entry in this directory.
+base_model = "anthropic/claude-fable-5-1"
+structured_output = true
+reasoning_options = [{ type = "toggle" }, { type = "effort", values = ["low", "medium", "high", "xhigh", "max"] }]
+interleaved = true
+
+[cost]
+input = 11
+output = 55
+cache_read = 0.275
+cache_write = 13.75
