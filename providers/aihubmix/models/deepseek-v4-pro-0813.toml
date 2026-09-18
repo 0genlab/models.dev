@@ -6,12 +6,14 @@
 # $.output_config.effort on /v1/messages, subject to model support.
 # https://docs.aihubmix.com/cn/api/unified-inference
 # These three are the lab's own published levels, passed through unchanged: DeepSeek
-# documents `reasoning_effort` as `Possible values: [low, high, max]`, with `medium`
-# and `xhigh` folded into `high` (api-docs.deepseek.com, checked 2026-08-13), and all
+# documents `reasoning_effort` as `Possible values: [none, low, high, max]`, with `medium`
+# and `xhigh` folded into `high` (api-docs.deepseek.com, checked 2026-09-18), and all
 # seven DeepSeek routes here carry the same set. Probing on 2026-09-15 could not
 # separate them on a single prompt (low/high/max → 522/564/510 reasoning tokens,
 # non-monotonic), which says something about that prompt, not about the enum.
-# Off is the toggle on this path; `none` is a level only on the Responses face.
+# `none` is listed alongside them but is the off switch spelled as a level -- the docs
+# read "none disables thinking mode; low/high/max enable thinking mode" -- so it is
+# carried by `type = "toggle"` above and deliberately left out of the effort values.
 base_model = "deepseek/deepseek-v4-pro-0813"
 
 [interleaved]
