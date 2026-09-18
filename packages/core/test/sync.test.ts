@@ -5524,6 +5524,16 @@ test("does not let a narrower AIHubMix modality list delete an accepted one", ()
     aihubmixLabIDs,
   );
   expect(widened?.modalities?.input).toEqual(["text", "image", "pdf"]);
+
+  // The endpoint omits modalities for part of the catalog, and the fallback is
+  // two overlapping records — the file's own list and the lab entry it narrows —
+  // so a shared entry has to collapse rather than be written twice.
+  const omitted = buildAihubmixModel(
+    aihubmixModel({ model_id: "minimax-m2", vendor: "minimax" }),
+    authored,
+    aihubmixLabIDs,
+  );
+  expect(omitted?.modalities?.input).toEqual(["text", "image"]);
 });
 
 test("records an AIHubMix route's own name only where its ID is not the lab slug", () => {

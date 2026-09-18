@@ -883,7 +883,10 @@ function modalities(value: string | null | undefined, fallback: string[]) {
     .split(",")
     .map((entry) => entry.trim())
     .filter((entry) => ["text", "audio", "image", "video", "pdf"].includes(entry));
-  const known = fallback.length > 0 ? fallback : ["text"];
+  // The fallback is two overlapping records — a narrowing list already on the file
+  // and the lab entry it narrows — so a shared entry collapses rather than being
+  // written twice on a route whose modalities the endpoint omits.
+  const known = fallback.length > 0 ? [...new Set(fallback)] : ["text"];
   if (parsed.length === 0) return known as SyncedFullModel["modalities"]["input"];
   // Endpoint order first, so a file only changes when its content changes.
   return [...new Set([...parsed, ...known])] as SyncedFullModel["modalities"]["input"];
