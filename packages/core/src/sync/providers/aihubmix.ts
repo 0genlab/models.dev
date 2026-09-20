@@ -175,6 +175,20 @@ const EFFORT_ALIASES: Record<string, string> = { no_think: "none", instant: "min
 // nothing where it means nothing, which the filter below already drops.
 const EFFORT_VALUES = new Set<string>(REASONING_EFFORT_VALUES);
 
+// The catalog previously echoed this protocol-wide domain without model-level
+// evidence. The payload has no provenance flag distinguishing such a fallback
+// from a verified full domain, so conservatively omit this effort option. This
+// is an evidence guard, not a claim that no model could support all seven values.
+const UNVERIFIED_PROTOCOL_EFFORT_VALUES = new Set([
+  "none", "minimal", "low", "medium", "high", "xhigh", "max",
+]);
+
+function isUnverifiedProtocolDomain(values: string[]) {
+  const unique = new Set(values);
+  return unique.size === UNVERIFIED_PROTOCOL_EFFORT_VALUES.size
+    && [...unique].every((value) => UNVERIFIED_PROTOCOL_EFFORT_VALUES.has(value));
+}
+
 /**
  * Only the IDs are read. The projection carries the resolved parameter domains
  * too, but reading those here would make the adapter answer to two sources for
@@ -601,6 +615,7 @@ function reasoningOptions(
     const values = (option.values ?? [])
       .map((value) => EFFORT_ALIASES[value] ?? value)
       .filter((value) => EFFORT_VALUES.has(value));
+    if (isUnverifiedProtocolDomain(values)) return [];
     return values.length > 0 ? [{ type: "effort" as const, values }] : [];
   });
   // AIHubMix accepts whichever off switch the caller's SDK speaks and maps it,

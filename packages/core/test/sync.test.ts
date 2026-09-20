@@ -5985,23 +5985,30 @@ test("reads a steering pair from the AIHubMix list rather than the word `reasoni
   expect(aihubmix.parseModels({ data: offOnly }).map((model) => model.model_id)).toEqual(["glm-5.1"]);
 });
 
-test("preserves a complete AIHubMix effort domain supplied by the endpoint", () => {
+test("guards against AIHubMix protocol-wide effort domains without model evidence", () => {
   const values = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
-  for (const domain of [values, [...values].reverse()]) {
+  for (const domain of [values, [...values].reverse(), [...values, "low"]]) {
     const model = aihubmixModel({
+      reasoning: true,
       reasoning_options: [
         { type: "toggle" },
         { type: "effort", values: domain },
         { type: "budget_tokens" },
       ],
     });
-    // Having all schema values is not evidence of a protocol fallback. The
-    // endpoint owns the domain; only the redundant toggle is folded away.
     expect(buildAihubmixModel(model, aihubmixAuthored, aihubmixLabIDs)?.reasoning_options).toEqual([
-      { type: "effort", values: domain },
+      { type: "toggle" },
       { type: "budget_tokens", min: undefined, max: undefined },
     ]);
+    const effortOnly = { ...model, reasoning_options: [{ type: "effort", values: domain }] };
+    // An unverified list is not an affirmative declaration of no controls.
+    expect(() => buildAihubmixModel(effortOnly, undefined, aihubmixLabIDs)).toThrow(MissingReasoningOptionsError);
+    expect(buildAihubmixModel(effortOnly, aihubmixAuthored, aihubmixLabIDs)?.reasoning_options).toEqual(
+      aihubmixAuthored.reasoning_options,
+    );
   }
+  const native = aihubmixModel({ reasoning_options: [{ type: "effort", values: ["low", "high", "max"] }] });
+  expect(buildAihubmixModel(native, undefined, aihubmixLabIDs)?.reasoning_options).toEqual(native.reasoning_options);
 });
 
 test("honors an explicit empty AIHubMix reasoning control list on creates and updates", () => {
