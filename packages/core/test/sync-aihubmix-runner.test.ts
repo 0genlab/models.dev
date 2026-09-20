@@ -74,6 +74,19 @@ test("AIHubMix sync carries a hand-authored note through an authoritative header
     expect(Bun.TOML.parse(content)).toMatchObject({
       reasoning_options: [{ type: "toggle" }, { type: "effort", values: ["low", "high", "max"] }],
     });
+
+    // A later explicit withdrawal must survive the runner's preservation logic,
+    // remove obsolete control comments, and keep the human verification note.
+    const response = JSON.parse(await readFile(listing, "utf8"));
+    response.data[0].reasoning_options = [];
+    await Bun.write(listing, JSON.stringify(response));
+    expect(await syncProvider({ ...aihubmix, modelsDir })).toMatchObject({ updated: 1 });
+    const withdrawn = await readFile(relayPath, "utf8");
+    expect(Bun.TOML.parse(withdrawn).reasoning_options).toEqual([]);
+    expect(withdrawn).toContain(note.trim());
+    expect(withdrawn).not.toContain("# Toggle:");
+    expect(withdrawn).not.toContain("# Effort:");
+    expect(await syncProvider({ ...aihubmix, modelsDir })).toMatchObject({ updated: 0, unchanged: 1 });
   } finally {
     if (listingURL === undefined) delete process.env.AIHUBMIX_MODELS_URL;
     else process.env.AIHUBMIX_MODELS_URL = listingURL;

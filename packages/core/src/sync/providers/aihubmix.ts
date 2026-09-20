@@ -176,31 +176,6 @@ const EFFORT_ALIASES: Record<string, string> = { no_think: "none", instant: "min
 const EFFORT_VALUES = new Set<string>(REASONING_EFFORT_VALUES);
 
 /**
- * The full `ReasoningEffort` enum of the OpenAI chat protocol, which the host
- * echoes verbatim for a route it holds no per-model levels for. It is the
- * protocol's accepted set, not the model's own ladder, and the routes that
- * receive it say so themselves: `grok-4-fast-non-reasoning` — a route whose name
- * states it does not reason — carries all seven with `default = none`, as do the
- * pinned `gpt-5.2-high` / `gpt-5.2-low` variants and the image route
- * `gemini-3-pro-image`. 18 of 409 routes are served it, among them every Qwen
- * 3.5/3.6/3.7 entry while Qwen 3.8 carries a real `low|medium|xhigh`; live
- * probing of `qwen3.7-flash` and `deepseek-v4-pro-0813` finds the six non-`none`
- * levels reproducibly non-monotonic (`minimal` above `high`, `xhigh` lowest),
- * so nothing but the off state is observable across them.
- *
- * `default` stays route-specific throughout, so the host does know the route's
- * setting and is stating the protocol in `values` rather than the model. A file
- * that copied it would publish a ladder no caller can steer with.
- */
-const PROTOCOL_EFFORT_SET = new Set(["none", "minimal", "low", "medium", "high", "xhigh", "max"]);
-
-function statesProtocolNotModel(values: string[]) {
-  return (
-    values.length === PROTOCOL_EFFORT_SET.size && values.every((value) => PROTOCOL_EFFORT_SET.has(value))
-  );
-}
-
-/**
  * Only the IDs are read. The projection carries the resolved parameter domains
  * too, but reading those here would make the adapter answer to two sources for
  * the same field; the model list stays the one voice on what a route is, and
@@ -605,6 +580,9 @@ function reasoningOptions(
   existing?: ExistingModel,
 ): SyncedFullModel["reasoning_options"] {
   if (model.reasoning_options == null) return undefined;
+  // Only an explicitly empty source list states that no controls are exposed.
+  // Do not confuse it with missing data or a nonempty list we cannot translate.
+  if (model.reasoning_options.length === 0) return [];
   const options = model.reasoning_options.flatMap((option) => {
     if (option.type === "toggle") return [{ type: option.type }];
     // The endpoint states that a budget exists but not its bounds, so the bounds a
@@ -623,10 +601,6 @@ function reasoningOptions(
     const values = (option.values ?? [])
       .map((value) => EFFORT_ALIASES[value] ?? value)
       .filter((value) => EFFORT_VALUES.has(value));
-    // A level list is only worth recording where it is the model's; the protocol's
-    // own enum tells a caller nothing, so it is dropped and the toggle and budget
-    // the same route publishes are left to carry the reasoning surface.
-    if (statesProtocolNotModel(values)) return [];
     return values.length > 0 ? [{ type: "effort" as const, values }] : [];
   });
   // AIHubMix accepts whichever off switch the caller's SDK speaks and maps it,
