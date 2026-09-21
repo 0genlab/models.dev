@@ -1,5 +1,4 @@
 base_model = "xiaomi/mimo-v2.6-pro"
-attachment = true
 reasoning_options = []
 
 [interleaved]
