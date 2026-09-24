@@ -1,13 +1,13 @@
 # Toggle:
 # $.enable_thinking = true|false on the OpenAI-compatible /v1/chat/completions path (verified live 2026-09-11);
 # $.thinking.type = "enabled"|"disabled"|"adaptive" on /v1/messages; $.generationConfig.thinkingConfig on the Gemini path.
-# Effort: low|high|max
+# Effort: high|max
 # $.reasoning_effort on /v1/chat/completions (alias $.reasoning.effort, which is also the Responses field);
 # $.output_config.effort on /v1/messages, subject to model support.
 # https://docs.aihubmix.com/cn/api/unified-inference
-# AIHubMix publishes low/high/max for this route. A 2026-09-15 host probe
-# accepted all three but returned 522/564/510 reasoning tokens on one prompt;
-# that probe establishes acceptance, not a monotonic depth distinction.
+# AIHubMix accepts low/high/max, but a 2026-09-15 host probe returned
+# 522/564/510 reasoning tokens on one prompt. Until the first-party baseline is
+# updated, acceptance alone does not establish `low` as a distinct Pro depth.
 base_model = "deepseek/deepseek-v4-pro-0813"
 
 [interleaved]
@@ -18,7 +18,7 @@ type = "toggle"
 
 [[reasoning_options]]
 type = "effort"
-values = ["low", "high", "max"]
+values = ["high", "max"]
 
 [cost]
 input = 0.6918

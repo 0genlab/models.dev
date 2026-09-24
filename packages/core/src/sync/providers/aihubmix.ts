@@ -609,10 +609,19 @@ function reasoningOptions(
       return [{ type: "budget_tokens" as const, min: min ?? undefined, max: max ?? undefined }];
     }
     if (option.type !== "effort") return [];
-    const values = (option.values ?? [])
+    let values = (option.values ?? [])
       .map((value) => EFFORT_ALIASES[value] ?? value)
       .filter((value) => EFFORT_VALUES.has(value));
     if (isUnverifiedProtocolDomain(values)) return [];
+    // A relay-wide endpoint accepting another string is not enough to widen a
+    // model's reviewed control surface. Existing provider metadata is the peer/
+    // lab baseline for this route; the sync may narrow it when the host removes
+    // a level, but widening stays an explicit data review.
+    const authored = existing?.reasoning_options?.find((entry) => entry.type === "effort");
+    if (authored?.type === "effort") {
+      const baseline = new Set(authored.values);
+      values = values.filter((value) => baseline.has(value));
+    }
     return values.length > 0 ? [{ type: "effort" as const, values }] : [];
   });
   // AIHubMix accepts whichever off switch the caller's SDK speaks and maps it,
