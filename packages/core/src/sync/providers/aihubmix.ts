@@ -17,7 +17,14 @@ const API_ENDPOINT = "https://aihubmix.com/api/v1/models?type=llm";
  */
 const CANON_ENDPOINT = "https://aihubmix.com/model-data/index.json";
 
-/** AIHubMix quotes USD per 1M tokens directly, matching the catalog unit. */
+/**
+ * Only `billing_config` prices are authoritative. The public model page labels
+ * these rates as `$.../M tokens` and its structured offer data names USD:
+ * https://aihubmix.com/model/deepseek-v4.1-flash
+ * The public models endpoint returns the same numbers with
+ * `pricing_source = "billing_config"`; `legacy_ratio` is a fallback estimate and
+ * must never be published as token pricing.
+ */
 const Pricing = z
   .object({
     input: z.number().nullish(),
@@ -67,6 +74,7 @@ export const AihubmixModel = z
     variant_of: z.string().nullish(),
     desc: z.string().nullish(),
     pricing: Pricing.nullish(),
+    pricing_source: z.string().nullish(),
     features: z.string().nullish(),
     input_modalities: z.string().nullish(),
     output_modalities: z.string().nullish(),
@@ -126,45 +134,26 @@ const VENDOR_LABS: Record<string, string> = {
 // in the whole 409-route list (`no_think` 3, `instant` 1); both are reported
 // upstream, and the table goes when the endpoint spells them the catalog's way.
 /**
- * Route variants the catalog does not carry. Every one of these affixes names a
- * way into a model that is already listed under its own ID, not a model of its
- * own: `-free` is the free-tier route (53 of them; 40 carry `variant_of` pointing
- * at the paid route), `-reasoning`/`-non-reasoning` are the pre-split Grok routes
- * that reach one model with thinking forced on or off — a steering choice the
- * catalog states as `reasoning_options`, not as two entries — and `coding-` is
- * the discounted coding-agent route (32 of them; 19 once the `-free` overlap is
- * removed, of which 11 say so through `variant_of` and 8 are the same shape with
- * the pointer not yet backfilled). Filtering here rather than at translate keeps
- * them out of the missing-model issues too.
- *
- * A route variant reprices the model, which is exactly what `-free` does too, so
- * repricing is not what makes an entry its own model. Every `coding-` route's
- * plain sibling is listed and syncs a file of its own. `minimax-m2.7-highspeed`
- * is the one reached under other prefixes: `cc-minimax-m2.7-highspeed` and
- * `mm-minimax-m2.7-highspeed` are both listed, match no affix here, and declare
- * `variant_of = minimax-m2.7-highspeed`, which resolves to the lab entry
- * `models/minimax/MiniMax-M2.7-highspeed.toml` — so a sync writes each of them a
- * card and what the filter drops is the `coding-` price point, not the model. The
- * MiMo V2.5 pair reads the same way: the list spells them `mimo-v2.5` and
- * `mimo-v2.5-pro` with no `xiaomi-` prefix, so deleting the `xiaomi-`/`coding-`
- * spellings costs nothing a sync does not write back. The one pair that does go
- * uncarded is `mimo-v2-omni`/`mimo-v2-pro`, listed as reasoning while publishing
- * no `reasoning_options` and skipped for that reason rather than by this filter.
- *
- * `-reasoning` is the one affix the gateway does not own outright: a lab can end
- * a model's real name with it, and `AiHubmix-Phi-4-mini-reasoning` is Microsoft's
- * — cataloged here as `providers/azure/models/phi-4-mini-reasoning.toml`. What
- * makes the Grok routes a steering pair is that they come as a pair, so
- * `isRouteVariant` asks the catalog for the `-non-reasoning` half rather than
- * trusting the word. That reads the same list every other rule here reads, so it
- * needs no allowlist to keep current.
+ * Drop a routing mode only when the same listing proves that a catalog route
+ * remains: either `variant_of` names a listed target, or the mechanical sibling
+ * is present. Prefix/suffix shape alone is not evidence; unmatched discounted
+ * and free routes stay in the sync and can be authored or reported as missing.
+ * The reasoning suffix likewise needs its opposite half, because it can be part
+ * of a lab model's real name (`phi-4-mini-reasoning`).
  */
-const ROUTE_VARIANT_ID = /^coding-|-(?:free|non-reasoning)$/i;
+const CODING_PREFIX = /^coding-/i;
+const FREE_SUFFIX = /-free$/i;
+const STEERING_OFF = /-non-reasoning$/i;
 const STEERING_ON = /-reasoning$/i;
 
-function isRouteVariant(id: string, catalog: RelayCatalog) {
-  if (ROUTE_VARIANT_ID.test(id)) return true;
-  return STEERING_ON.test(id) && catalog.has(id.toLowerCase().replace(STEERING_ON, "-non-reasoning"));
+function isRouteVariant(model: AihubmixModel, catalog: RelayCatalog) {
+  const id = model.model_id.toLowerCase();
+  const declared = model.variant_of?.toLowerCase();
+  if (declared !== undefined && catalog.has(declared)) return true;
+  if (CODING_PREFIX.test(id) && catalog.has(id.replace(CODING_PREFIX, ""))) return true;
+  if (FREE_SUFFIX.test(id) && catalog.has(id.replace(FREE_SUFFIX, ""))) return true;
+  if (STEERING_OFF.test(id)) return catalog.has(id.replace(STEERING_OFF, "-reasoning"));
+  return STEERING_ON.test(id) && catalog.has(id.replace(STEERING_ON, "-non-reasoning"));
 }
 
 const EFFORT_ALIASES: Record<string, string> = { no_think: "none", instant: "minimal" };
@@ -329,7 +318,7 @@ export const aihubmix = {
     // closure, where the module-level binding is no longer narrowed.
     const catalog = relayCatalog;
     const listed = [...catalog.values()].filter(
-      (model) => !isRouteVariant(model.model_id, catalog),
+      (model) => !isRouteVariant(model, catalog),
     );
     // Dropped silently for the same reason: an uncovered route is not a gap in
     // this repo that a contributor here can close — the work is to verify the
@@ -360,6 +349,10 @@ export function buildAihubmixModel(
   labIDs: LabMetadataIDs | undefined = labMetadataIDs,
   catalog: RelayCatalog | undefined = relayCatalog,
 ): SyncedModel | undefined {
+  // A legacy ratio is a routing fallback, not a billable token price. Existing
+  // hand-authored prices may have their own evidence, but a new catalog card
+  // needs a real billing_config row before this sync can create it.
+  if (existing === undefined && model.pricing_source !== "billing_config") return undefined;
   const base = existing?.base_model ?? resolveBaseModel(model, labIDs, catalog);
   // `dev` carries 77 aihubmix files, so most of the catalog arrives as a create
   // with no file to union against. The lab entry the relay factors onto is the
@@ -419,7 +412,10 @@ export function buildAihubmixModel(
     status: resolveStatus(model.retire_stage, existing?.status),
     modalities: { input, output },
     limit,
-    cost: buildCost(model.pricing, existing?.cost),
+    cost: buildCost(
+      model.pricing_source === "billing_config" ? model.pricing : undefined,
+      existing?.cost,
+    ),
   };
 
   if (base !== undefined) {
@@ -553,10 +549,11 @@ function bareID(modelID: string) {
 const GOOGLE_NATIVE_EXCLUDED = ["-nothink", "-search"];
 
 export function wireProtocol(modelID: string): string {
-  if (modelID.startsWith("claude")) return "anthropic.messages";
+  const id = bareID(modelID).toLowerCase();
+  if (id.startsWith("claude")) return "anthropic.messages";
   if (
-    (modelID.startsWith("gemini") || modelID.startsWith("imagen")) &&
-    !GOOGLE_NATIVE_EXCLUDED.some((suffix) => modelID.endsWith(suffix))
+    (id.startsWith("gemini") || id.startsWith("imagen")) &&
+    !GOOGLE_NATIVE_EXCLUDED.some((suffix) => id.endsWith(suffix))
   ) {
     return "google.gemini";
   }
@@ -612,15 +609,9 @@ function reasoningOptions(
       return [{ type: "budget_tokens" as const, min: min ?? undefined, max: max ?? undefined }];
     }
     if (option.type !== "effort") return [];
-    let values = (option.values ?? [])
+    const values = (option.values ?? [])
       .map((value) => EFFORT_ALIASES[value] ?? value)
       .filter((value) => EFFORT_VALUES.has(value));
-    // Keep this relay aligned with the current first-party models.dev entry.
-    // The upstream catalog treats V4 Pro as high|max; a host accepting `low`
-    // is not enough evidence that it is a distinct caller-visible depth.
-    if (model.model_id === "deepseek-v4-pro-0813") {
-      values = values.filter((value) => value === "high" || value === "max");
-    }
     if (isUnverifiedProtocolDomain(values)) return [];
     return values.length > 0 ? [{ type: "effort" as const, values }] : [];
   });

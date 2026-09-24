@@ -5112,6 +5112,7 @@ function aihubmixModel(overrides: Partial<AihubmixModel> = {}): AihubmixModel {
     // its own below rather than made the default every other test inherits.
     reasoning_options: [{ type: "effort", values: ["none", "low", "high"] }],
     pricing: { input: 0.25, output: 1.5, cache_read: 0.025 },
+    pricing_source: "billing_config",
     ...overrides,
   };
 }
@@ -5432,6 +5433,14 @@ test("keeps AIHubMix audio and reasoning prices the endpoint never quotes", () =
   expect(model?.cost?.reasoning).toBe(3);
   // The endpoint still owns the text rates it does quote.
   expect(model?.cost?.tiers?.[0]).toMatchObject({ input: 0.6, output: 3.2, input_audio: 1.9 });
+});
+
+test("never publishes AIHubMix legacy-ratio pricing", () => {
+  const legacy = aihubmixModel({ pricing_source: "legacy_ratio" });
+  expect(buildAihubmixModel(legacy, undefined, aihubmixLabIDs)).toBeUndefined();
+
+  const updated = buildAihubmixModel(legacy, aihubmixAuthored, aihubmixLabIDs);
+  expect(updated?.cost).toEqual(aihubmixAuthored.cost);
 });
 
 test("keeps AIHubMix fields the endpoint has no surface for", () => {
@@ -5932,21 +5941,31 @@ test("drops AIHubMix route variants before they reach the catalog", () => {
   // `-reasoning`/`-non-reasoning` are the pre-split Grok routes that reach one
   // model with thinking forced on or off — steering the catalog states as
   // `reasoning_options`, not as two entries — and `coding-` is the discounted
-  // coding-agent route into a model listed plainly as well. parseModels drops
-  // them, so they raise no skip notice and no missing-model issue asking a human
-  // to fill them in.
+  // coding-agent route into a model listed plainly as well. A shape alone is not
+  // enough: the same response must name the target or carry the mechanical
+  // sibling, otherwise the route stays visible to the sync.
   const variants = [
-    aihubmixModel({ model_id: "coding-glm-5.1-free" }),
+    aihubmixModel({ model_id: "coding-glm-5.1-free", variant_of: "glm-5.1" }),
     aihubmixModel({ model_id: "grok-4-fast-reasoning" }),
     aihubmixModel({ model_id: "grok-4-fast-non-reasoning" }),
-    // The prefix is dropped whether or not the endpoint backfilled the pointer:
-    // 8 of the 19 paid `coding-` routes carry no `variant_of` yet.
     aihubmixModel({ model_id: "coding-minimax-m2.7", variant_of: "minimax-m2.7" }),
     aihubmixModel({ model_id: "coding-glm-5.1" }),
   ];
-  const kept = aihubmixModel({ model_id: "glm-5.1" });
-  const parsed = aihubmix.parseModels({ data: [...variants, kept] });
-  expect(parsed.map((model) => model.model_id)).toEqual(["glm-5.1"]);
+  const siblings = [
+    aihubmixModel({ model_id: "glm-5.1" }),
+    aihubmixModel({ model_id: "minimax-m2.7" }),
+  ];
+  const parsed = aihubmix.parseModels({ data: [...variants, ...siblings] });
+  expect(parsed.map((model) => model.model_id)).toEqual(["glm-5.1", "minimax-m2.7"]);
+
+  const unmatched = [
+    aihubmixModel({ model_id: "coding-orphan" }),
+    aihubmixModel({ model_id: "orphan-free" }),
+  ];
+  expect(aihubmix.parseModels({ data: unmatched }).map((model) => model.model_id)).toEqual([
+    "coding-orphan",
+    "orphan-free",
+  ]);
 
   // Anchored at the front, so a lab that uses the word mid-ID keeps its entry.
   const midword = aihubmixModel({ model_id: "qwen3-coding-plus" });
@@ -5977,12 +5996,15 @@ test("reads a steering pair from the AIHubMix list rather than the word `reasoni
   ];
   expect(aihubmix.parseModels({ data: paired }).map((model) => model.model_id)).toEqual(["glm-5.1"]);
 
-  // The off half goes on its own name, paired or not: nothing else ends that way.
+  // The off half is also retained unless the response proves the steering pair.
   const offOnly = [
     aihubmixModel({ model_id: "grok-4-fast-non-reasoning" }),
     aihubmixModel({ model_id: "glm-5.1" }),
   ];
-  expect(aihubmix.parseModels({ data: offOnly }).map((model) => model.model_id)).toEqual(["glm-5.1"]);
+  expect(aihubmix.parseModels({ data: offOnly }).map((model) => model.model_id)).toEqual([
+    "grok-4-fast-non-reasoning",
+    "glm-5.1",
+  ]);
 });
 
 test("guards against AIHubMix protocol-wide effort domains without model evidence", () => {
@@ -6118,7 +6140,9 @@ test("routes an AIHubMix model to the protocol its provider package actually spe
   // than once for the provider, so a catalog entry describes whichever of the
   // four protocols that ID lands on.
   expect(wireProtocol("claude-opus-4-8-think")).toBe("anthropic.messages");
+  expect(wireProtocol("Anthropic/Claude-Opus-4-8-Think")).toBe("anthropic.messages");
   expect(wireProtocol("gemini-3.1-flash-lite")).toBe("google.gemini");
+  expect(wireProtocol("Google/Gemini-3.1-Flash-Lite")).toBe("google.gemini");
   expect(wireProtocol("imagen-4")).toBe("google.gemini");
   // The provider sends these two Gemini routing modes back down the
   // OpenAI-compatible path, so the Gemini prefix is not the whole rule.
