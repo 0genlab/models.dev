@@ -1,23 +1,14 @@
 # Toggle:
 # $.enable_thinking = true|false on the OpenAI-compatible /v1/chat/completions path (verified live 2026-09-11);
 # $.thinking.type = "enabled"|"disabled"|"adaptive" on /v1/messages; $.generationConfig.thinkingConfig on the Gemini path.
-# Effort: low|high|max
+# Effort: high|max
 # $.reasoning_effort on /v1/chat/completions (alias $.reasoning.effort, which is also the Responses field);
 # $.output_config.effort on /v1/messages, subject to model support.
 # https://docs.aihubmix.com/cn/api/unified-inference
-# Model-specific basis (accessed 2026-09-20), not a host-only widening:
-# https://api-docs.deepseek.com/news/news260813/
-# The 2026-08-13 V4-Pro GA announcement explicitly introduces low/high/max.
-# https://api-docs.deepseek.com/quick_start/pricing/
-# The pricing table maps API model deepseek-v4-pro to DeepSeek-V4-Pro-0813.
-# https://api-docs.deepseek.com/guides/thinking_mode/
-# The mapping is low -> low, medium/high/xhigh -> high, max -> max.
-# https://aihubmix.com/api/v1/models?type=llm
-# This route publishes low/high/max too. The first-party catalog entry still
-# cites 2026-06-25, before the GA announcement; it is not the current baseline.
-# Host probes on 2026-09-15 accepted low/high/max but returned 522/564/510
-# reasoning tokens on one prompt. They do not establish a depth distinction;
-# the three-level declaration is supported by the model-specific release docs.
+# Conservative relay baseline: match the first-party DeepSeek V4 Pro entry.
+# A 2026-09-15 host probe accepted low/high/max but returned 522/564/510
+# reasoning tokens on one prompt, so it did not establish `low` as a distinct
+# caller-visible depth on this route.
 base_model = "deepseek/deepseek-v4-pro-0813"
 
 [interleaved]
@@ -28,7 +19,7 @@ type = "toggle"
 
 [[reasoning_options]]
 type = "effort"
-values = ["low", "high", "max"]
+values = ["high", "max"]
 
 [cost]
 input = 0.6918

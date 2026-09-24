@@ -69,10 +69,10 @@ test("AIHubMix sync carries a hand-authored note through an authoritative header
     expect(content).toContain(note.trim());
     // The block is refreshed rather than appended beside the opening it replaces.
     expect(content).toContain("# Toggle:\n# $.enable_thinking = true|false");
-    expect(content).toContain("# Effort: low|high|max");
+    expect(content).toContain("# Effort: high|max");
     expect(content).not.toContain("# Toggle: enable_thinking = true|false\n");
     expect(Bun.TOML.parse(content)).toMatchObject({
-      reasoning_options: [{ type: "toggle" }, { type: "effort", values: ["low", "high", "max"] }],
+      reasoning_options: [{ type: "toggle" }, { type: "effort", values: ["high", "max"] }],
     });
 
     // A later explicit withdrawal must survive the runner's preservation logic,

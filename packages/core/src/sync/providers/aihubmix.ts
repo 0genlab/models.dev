@@ -612,9 +612,15 @@ function reasoningOptions(
       return [{ type: "budget_tokens" as const, min: min ?? undefined, max: max ?? undefined }];
     }
     if (option.type !== "effort") return [];
-    const values = (option.values ?? [])
+    let values = (option.values ?? [])
       .map((value) => EFFORT_ALIASES[value] ?? value)
       .filter((value) => EFFORT_VALUES.has(value));
+    // Keep this relay aligned with the current first-party models.dev entry.
+    // The upstream catalog treats V4 Pro as high|max; a host accepting `low`
+    // is not enough evidence that it is a distinct caller-visible depth.
+    if (model.model_id === "deepseek-v4-pro-0813") {
+      values = values.filter((value) => value === "high" || value === "max");
+    }
     if (isUnverifiedProtocolDomain(values)) return [];
     return values.length > 0 ? [{ type: "effort" as const, values }] : [];
   });
