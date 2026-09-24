@@ -1,0 +1,10 @@
+# Generated from the anonymous AIHubMix image-generation catalog.
+# Pricing is USD per million input/output tokens.
+# Catalog: https://aihubmix.com/api/v1/models?type=image_generation&sort_by=order
+# Currency proof: https://aihubmix.com/models/gpt-image-2.5-sunburst
+base_model = "openai/gpt-image-2.5-sunburst"
+
+[cost]
+input = 5
+output = 30
+cache_read = 1.25
