@@ -1,0 +1,9 @@
+# Generated from the anonymous AIHubMix video catalog.
+# Pricing is USD per million input/output tokens.
+# Catalog: https://aihubmix.com/api/v1/models?type=video&sort_by=order
+# Currency proof: https://aihubmix.com/models/veo-3.1-generate-preview
+base_model = "google/veo-3.1-generate-preview"
+
+[cost]
+input = 2
+output = 2
