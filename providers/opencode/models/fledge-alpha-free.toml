@@ -1,0 +1,27 @@
+# OpenCode-only free-tier preview alias; no shared lab-model identity is published for this variant.
+# 32,800 output tokens is OpenCode's advertised client cap, not a published upstream maximum.
+# Input, output, and reasoning tokens together share the 262,144-token context budget.
+# Effort control: reasoning_effort = none|minimal|low|medium|high|xhigh.
+name = "Fledge Alpha Free"
+description = "Free-tier preview model for agentic tasks with text, image, and audio input"
+release_date = "2026-10-01"
+last_updated = "2026-10-01"
+attachment = true
+reasoning = true
+reasoning_options = [
+  { type = "effort", values = ["none", "minimal", "low", "medium", "high", "xhigh"] },
+]
+tool_call = true
+open_weights = false
+
+[cost]
+input = 0
+output = 0
+
+[limit]
+context = 262_144
+output = 32_800
+
+[modalities]
+input = ["text", "image", "audio"]
+output = ["text"]
