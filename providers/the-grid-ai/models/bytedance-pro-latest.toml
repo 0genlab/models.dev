@@ -1,12 +1,12 @@
-name = "Text Standard"
-description = "Price-optimized models with low-latency, high-throughput and shorter maximum outputs. Any model that meets the contract spec can serve your request."
+name = "ByteDance Pro Latest"
+description = "Lab latest market for ByteDance Pro supply. You contract for the latest qualifying route, not a specific model."
 # contract spec: https://thegrid.ai/docs/instrument-specifications/current-instruments
-release_date = "2026-02-26"
-last_updated = "2026-07-15"
+release_date = "2026-07-06"
+last_updated = "2026-07-06"
 attachment = false
 reasoning = true
 reasoning_options = [{ type = "effort", values = ["low", "medium", "high"] }]
-temperature = true
+temperature = false
 tool_call = true
 structured_output = true
 open_weights = false
@@ -15,9 +15,9 @@ open_weights = false
 field = "reasoning_content"
 
 [limit]
-context = 128_000
-input = 120_000
-output = 65_536
+context = 262_144
+input = 256_000
+output = 131_072
 
 [modalities]
 input = ["text"]
@@ -25,4 +25,3 @@ output = ["text"]
 
 # Pricing on The Grid AI is variable.
 # Tokens trade on an open market, so cost is not fixed and is intentionally omitted here.
-# See the live price for Text Standard: https://app.thegrid.ai/trading/market-20536b70-3b9a-44be-aa50-3cd72d1ab8dd
