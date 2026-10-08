@@ -2,16 +2,11 @@
 # Free tier: the gateway catalog publishes this row at input=0, output=0.
 # Token costs (USD/MTok): input=0, output=0
 # Catalog: https://aihubmix.com/api/v1/models?type=llm&sort_by=order
-# Canon export SHA: 464fb99a02c6d36ae3ba87efd08c8b7649e4d785
-# Toggle: $.enable_thinking = true|false on /v1/chat/completions.
-# Budget: integer $.reasoning.max_tokens on /v1/chat/completions.
+# Canon export SHA: 2a52ac990fe5b9269164205f778ca4c93991e7ea
+# Reasoning: always on with no caller control on AIHubMix (live-tested 2026-10-08); reasoning text is not returned.
 base_model = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"
 name = "Nemotron 3 Nano Omni 30B A3B Reasoning (free)"
-interleaved = true
-[[reasoning_options]]
-type = "toggle"
-[[reasoning_options]]
-type = "budget_tokens"
+reasoning_options = []
 [cost]
 input = 0
 output = 0
