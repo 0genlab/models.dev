@@ -9,4 +9,4 @@ npm = "@ai-sdk/openai-compatible"
 # independently guaranteed by this endpoint table.
 # https://opencode.ai/docs/zen#endpoints
 api = "https://opencode.ai/zen/v1"
-doc = "https://opencode.ai/docs/zen"
+doc = "https://opencode.ai/v2/docs/console/models/"
