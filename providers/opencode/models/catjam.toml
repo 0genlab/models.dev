@@ -1,4 +1,4 @@
-name = "CatJam"
+name = "Cat Jam Free"
 description = "A text-only reasoning model for coding and agentic workflows, with tool calling and structured JSON outputs."
 release_date = "2026-10-12"
 last_updated = "2026-10-12"
