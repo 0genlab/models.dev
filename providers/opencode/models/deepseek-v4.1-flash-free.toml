@@ -1,3 +1,7 @@
+# Effort: reasoning_effort = low|high|max. No toggle, matching opencode/deepseek-v4.1-flash:
+# OpenCode routes this model through hosts where non-thinking output can leak tool-call markup.
+# Free: zero price per https://opencode.ai/v2/docs/console/models/#pricing
+# Limits: OpenCode free-tier caps (200K context / 32K output), as on mimo-v2.6-flash-free.
 base_model = "deepseek/deepseek-v4.1-flash"
 name = "DeepSeek V4.1 Flash Free"
 
