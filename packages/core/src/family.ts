@@ -450,7 +450,7 @@ export const ModelFamilyValues = [
   // Elephant
   "elephant",
 
-  // Reflection
+  // Beam
   "beam",
 ] as const;
 
