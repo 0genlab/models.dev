@@ -1,0 +1,31 @@
+name = "Beam Free"
+description = "Sparse mixture-of-experts reasoning model with 23B active parameters for coding and agentic workflows"
+family = "beam"
+release_date = "2026-10-05"
+last_updated = "2026-10-05"
+knowledge = "2026-06"
+attachment = false
+reasoning = true
+reasoning_options = [
+  { type = "effort", values = ["low", "medium", "high", "xhigh", "max"] },
+]
+tool_call = true
+structured_output = true
+temperature = true
+open_weights = false
+
+[interleaved]
+field = "reasoning_content"
+
+[cost]
+input = 0
+output = 0
+cache_read = 0
+
+[limit]
+context = 1_048_576
+output = 131_072
+
+[modalities]
+input = ["text"]
+output = ["text"]
