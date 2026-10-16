@@ -11,7 +11,6 @@ export type ModelFamily =
   | "auto"
   | "baichuan"
   | "bart"
-  | "beam"
   | "bge"
   | "big-pickle"
   | "canopylabs"
