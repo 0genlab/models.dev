@@ -1,8 +1,8 @@
 name = "LL Alpha Free"
-description = "Sparse mixture-of-experts reasoning model with 23B active parameters for coding and agentic workflows"
-release_date = "2026-10-05"
-last_updated = "2026-10-05"
-knowledge = "2026-06-30"
+description = "Best in class local model"
+release_date = "2026-10-15"
+last_updated = "2026-10-15"
+knowledge = "2026-06"
 attachment = false
 reasoning = true
 reasoning_options = [
@@ -11,7 +11,7 @@ reasoning_options = [
 tool_call = true
 structured_output = true
 temperature = true
-open_weights = false
+open_weights = true
 
 [interleaved]
 field = "reasoning_content"
@@ -22,8 +22,8 @@ output = 0
 cache_read = 0
 
 [limit]
-context = 1_048_576
-output = 131_072
+context = 262_144
+output = 65_536
 
 [modalities]
 input = ["text"]
