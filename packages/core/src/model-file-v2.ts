@@ -22,9 +22,11 @@ const IDENTITY = [
 ] as const;
 
 // v1 fields → the v2 provider model file they stand for (without the header).
-export function providerModelToV2(model: Record<string, any>): Doc {
-  for (const field of ["interleaved", "provider"]) {
-    if (model[field] !== undefined) throw new Error(`${field} has no v2 field yet`);
+// `protocol` is the API the model is served on, for `provider` and `interleaved`
+// fields that don't set a shape (the migration script resolves it).
+export function providerModelToV2(model: Record<string, any>, protocol?: string): Doc {
+  for (const field of ["body", "headers"]) {
+    if (model.provider?.[field] !== undefined) throw new Error(`provider.${field} has no v2 field yet`);
   }
   const doc: Doc = { schema: 2 };
   if (model.base_model !== undefined) doc.base_model = model.base_model;
@@ -52,6 +54,8 @@ export function providerModelToV2(model: Record<string, any>): Doc {
   }
   if (Object.keys(capabilities).length > 0) doc.capabilities = capabilities;
   if (model.limit !== undefined) doc.limit = model.limit;
+  const api = apiEntry(model, protocol);
+  if (api !== undefined) doc.api = api;
 
   const cost: Doc | undefined = model.cost && toCostV2(model.cost);
   const multipliers: Doc[] = [];
@@ -82,16 +86,32 @@ export function providerModelToV2(model: Record<string, any>): Doc {
   return doc;
 }
 
+// v1 `provider` and `interleaved` → the model's `[api.<protocol>]` table.
+function apiEntry(model: Record<string, any>, fallback: string | undefined) {
+  const { provider, interleaved } = model;
+  if (provider === undefined && interleaved === undefined) return undefined;
+  const shape = provider?.shape;
+  const protocol =
+    shape === "responses" ? "responses" : shape === "completions" ? "chat-completions" : fallback;
+  if (protocol === undefined) throw new Error("provider and interleaved need the model's API protocol");
+  const entry: Doc = {};
+  if (provider?.api !== undefined) entry.base_url = provider.api;
+  if (provider?.npm !== undefined) entry.sdk = { aisdk: provider.npm };
+  if (interleaved === true) entry.compatibility = { replay_reasoning: true };
+  else if (interleaved !== undefined) entry.compatibility = { reasoning_field: interleaved.field };
+  return { [protocol]: entry };
+}
+
 // Applies a v1 change (`before` → `after`) to an existing v2 file. Fields whose
 // v1 view didn't change keep their v2 data (MIME modalities, cache TTLs, extra
 // capabilities, multipliers); changed prices are updated in place.
 export function patchModelV2(doc: Doc, before: Record<string, any>, after: Record<string, any>): Doc {
-  const next = providerModelToV2(after);
-  // `reasoning` may be inherited from the lab on one side, as in sameV1Model.
+  const next = providerModelToV2(after, Object.keys(doc.api ?? {})[0]);
+  // `reasoning` and `tool_call` may be inherited from the lab on one side, as in sameV1Model.
   const same = (...keys: string[]) =>
     keys.every(
       (key) =>
-        (key === "reasoning" && (before[key] === undefined || after[key] === undefined)) ||
+        ((key === "reasoning" || key === "tool_call") && (before[key] === undefined || after[key] === undefined)) ||
         stable(before[key]) === stable(after[key]),
     );
 
@@ -128,6 +148,7 @@ export function patchModelV2(doc: Doc, before: Record<string, any>, after: Recor
       if (capabilities !== undefined) mode.capabilities = capabilities;
     }
   }
+  if (same("provider", "interleaved") && doc.api !== undefined) next.api = doc.api;
   if (doc.metadata !== undefined) next.metadata = doc.metadata;
   return next;
 }
@@ -229,11 +250,12 @@ function isContextTier(when: unknown) {
 }
 
 // Compares two v1 models the way v2 files can express them: v2 always states
-// `reasoning` and derives `attachment`, while v1 files may inherit or omit them.
+// `reasoning` and `tool_call` when it sets them and derives `attachment`, while v1
+// files may inherit or omit them.
 export function sameV1Model(a: Record<string, any>, b: Record<string, any>) {
   const left = normalizeV1(a);
   const right = normalizeV1(b);
-  for (const key of ["reasoning", "attachment"]) {
+  for (const key of ["reasoning", "attachment", "tool_call"]) {
     if (left[key] === undefined || right[key] === undefined) {
       delete left[key];
       delete right[key];
@@ -288,6 +310,9 @@ export function formatModelV2(doc: Doc) {
   }
   for (const table of ["modalities", "capabilities", "limit"]) {
     if (doc[table] !== undefined) out.push("", `[${table}]`, ...tableLines(doc[table]));
+  }
+  for (const [protocol, entry] of Object.entries<Doc>(doc.api ?? {})) {
+    out.push("", `[api.${formatKey(protocol)}]`, ...tableLines(entry));
   }
   if (doc.cost !== undefined) out.push(...costLines(doc.cost));
   for (const [name, mode] of Object.entries<any>(doc.experimental?.modes ?? {})) {
