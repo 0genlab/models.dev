@@ -11,9 +11,9 @@ release_date = "2026-10-19"
 last_updated = "2026-10-19"
 attachment = true
 reasoning = true
-temperature = true
+temperature = false
 tool_call = true
-open_weights = false
+open_weights = true
 
 [limit]
 context = 1_000_000
