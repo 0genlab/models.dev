@@ -4,6 +4,7 @@ import { mergeDeep } from "remeda";
 import { z } from "zod";
 
 import { AuthoredModel, AuthoredModelShape, ModelMetadata } from "../schema.js";
+import { isSchemaV2, labModelV2ToV1, modelV2ToV1 } from "../translate.js";
 import { openMissingModelIssues } from "./missing-issues.js";
 import { MissingReasoningOptionsError } from "./missing-reasoning-options.js";
 import { aiand } from "./providers/aiand.js";
@@ -469,6 +470,12 @@ export async function syncProvider<SourceModel>(
       continue;
     }
 
+    // Sync writes v1 files, so it leaves migrated v2 files to be updated by hand.
+    if (current.v2) {
+      unchanged++;
+      continue;
+    }
+
     const headerChanged = provider.authoritativeHeaders && current.header !== file.header;
     if (
       headerChanged
@@ -646,6 +653,7 @@ async function readExisting(modelsDir: string) {
     toml: ExistingModel;
     header: string;
     symlink: boolean;
+    v2: boolean;
   }>();
   const brokenSymlinks = new Set<string>();
   let modelMetadata: Record<string, Record<string, unknown>> | undefined;
@@ -662,7 +670,12 @@ async function readExisting(modelsDir: string) {
       }
       throw error;
     }
-    const parsed = ExistingModel.safeParse(Bun.TOML.parse(text));
+    const raw = Bun.TOML.parse(text) as Record<string, unknown>;
+    const v2 = isSchemaV2(raw);
+    const { id: _id, ...translated } = v2
+      ? modelV2ToV1({ ...raw, id: file.slice(0, -5) }, { modelPath: filePath })
+      : raw;
+    const parsed = ExistingModel.safeParse(v2 ? translated : raw);
     if (!parsed.success) {
       parsed.error.cause = { path: filePath };
       throw parsed.error;
@@ -676,7 +689,7 @@ async function readExisting(modelsDir: string) {
       ? authored
       : resolveBaseModel(authored, modelMetadata ?? {}, filePath);
 
-    existing.set(file, { authored, toml, header: leadingComments(text), symlink });
+    existing.set(file, { authored, toml, header: leadingComments(text), symlink, v2 });
   }
 
   return { models: existing, brokenSymlinks, modelMetadata };
@@ -729,7 +742,9 @@ async function readModelMetadata(modelsDir: string) {
     const toml = Bun.TOML.parse(
       await Bun.file(modelPath).text(),
     ) as Record<string, unknown>;
-    result[modelID] = inheritableModelMetadata(toml);
+    result[modelID] = inheritableModelMetadata(
+      isSchemaV2(toml) ? labModelV2ToV1({ ...toml, id: modelID }, { modelPath }) : toml,
+    );
   }
 
   return result;
