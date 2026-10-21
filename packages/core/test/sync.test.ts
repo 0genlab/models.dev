@@ -4652,6 +4652,52 @@ test("prefers the gateway max_output over authored output on mapped resyncs", ()
   });
 });
 
+test("sorts mapped LLM Gateway deployment efforts low to high", () => {
+  const model = buildLLMGatewayMappedModel(llmGatewayMappedModel({
+    providers: [{
+      providerId: "anthropic",
+      vision: true,
+      tools: true,
+      reasoning: true,
+      reasoning_efforts: ["max", "xhigh", "none", "high", "low"],
+    }],
+  }), undefined);
+
+  expect(model).toMatchObject({
+    reasoning_options: [{ type: "effort", values: ["none", "low", "high", "xhigh", "max"] }],
+  });
+});
+
+test("keeps attachments and audio prices on mapped LLM Gateway audio deployments", () => {
+  const model = buildLLMGatewayMappedModel(llmGatewayMappedModel({
+    id: "openai/whisper-fable",
+    name: "Whisper Fable (OpenAI)",
+    family: "openai",
+    architecture: { input_modalities: ["text", "audio"], output_modalities: ["text"] },
+    providers: [{ providerId: "openai", vision: false, tools: false, reasoning: false }],
+    pricing: { prompt: "2.5e-6", completion: "10e-6", input_audio: "6e-6" },
+    context_length: 16_000,
+    max_output: 2_000,
+  }), {
+    name: "Whisper Fable (OpenAI)",
+    description: "Speech transcription model",
+    release_date: "2026-01-01",
+    last_updated: "2026-01-01",
+    attachment: true,
+    reasoning: false,
+    tool_call: false,
+    open_weights: false,
+    modalities: { input: ["text", "audio"], output: ["text"] },
+    limit: { context: 16_000, output: 2_000 },
+  });
+
+  expect(model).toMatchObject({
+    attachment: true,
+    modalities: { input: ["text", "audio"], output: ["text"] },
+    cost: { input: 2.5, output: 10, input_audio: 6 },
+  });
+});
+
 test("translates a none-only effort list into a reasoning toggle", () => {
   const model = buildLLMGatewayMappedModel(llmGatewayMappedModel({
     providers: [{ providerId: "anthropic", vision: true, tools: true, reasoning: true, reasoning_efforts: ["none"] }],
