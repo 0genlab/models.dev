@@ -38,6 +38,8 @@ import {
   type EdenAIModel,
 } from "../src/sync/providers/edenai.js";
 import { buildHyperModel, type HyperModel } from "../src/sync/providers/hyper.js";
+import { buildHuggingFaceModel, huggingface, type HuggingFaceModel } from "../src/sync/providers/huggingface.js";
+import { MissingReasoningOptionsError } from "../src/sync/missing-reasoning-options.js";
 import {
   buildInceptronModel,
   parseInceptronModels,
@@ -6792,4 +6794,74 @@ test("Ofox sync takes context tiers and audio prices from the catalog and keeps 
   expect(next.cost.text.input).toMatchObject({ price: 5, cache: { read: 0.5, write: { "5m": 6.25, "1h": 10 } } });
   expect(next.cost.text.input.overrides).toEqual([{ when: { context: { gt: 272_000 } }, price: 10, cache: { read: 1 } }]);
   expect(next.cost.audio.input.price).toBe(2);
+});
+
+function huggingFaceModel(overrides: Partial<HuggingFaceModel> = {}): HuggingFaceModel {
+  return {
+    id: "Qwen/Qwen3.5-122B-A10B",
+    architecture: { input_modalities: ["text", "image"], output_modalities: ["text"] },
+    providers: [
+      { provider: "slow", status: "live", context_length: 131_072, pricing: { input: 0.3, output: 2 }, throughput: 10, supports_tools: true },
+      { provider: "fast", status: "live", context_length: 262_144, pricing: { input: 0.4, output: 3.2 }, throughput: 90, supports_structured_output: true },
+    ],
+    ...overrides,
+  };
+}
+
+test("Hugging Face creates v2 files with host data only and the lab's exact MIME types", () => {
+  const doc = buildHuggingFaceModel(huggingFaceModel(), "alibaba/qwen3.5-122b-a10b");
+  for (const key of ["name", "description", "family", "release_date", "last_updated", "knowledge", "open_weights"]) {
+    expect(doc).not.toHaveProperty(key);
+  }
+  expect(doc).toMatchObject({
+    schema: 2,
+    base_model: "alibaba/qwen3.5-122b-a10b",
+    // The router lists text + image; the lab also takes video.
+    modalities: {
+      input: ["text", "image/bmp", "image/jpeg", "image/png", "image/tiff", "image/webp", "image/heic"],
+      output: ["text"],
+    },
+    capabilities: {
+      tools: { supported: true, updates: false },
+      structured_output: true,
+      effort_updates: false,
+    },
+    cost: { text: { input: { price: 0.4 }, output: { price: 3.2 } } },
+  });
+  expect(doc).not.toHaveProperty("limit");
+
+  // Same modality kinds as the lab: inherited.
+  const textOnly = buildHuggingFaceModel(huggingFaceModel({
+    id: "openai/gpt-oss-20b",
+    architecture: { input_modalities: ["text"], output_modalities: ["text"] },
+  }), "openai/gpt-oss-20b");
+  expect(textOnly).not.toHaveProperty("modalities");
+
+  // No live provider reports tools: tool support is inherited, not copied from the lab.
+  const noTools = buildHuggingFaceModel(huggingFaceModel({
+    providers: [{ provider: "fast", status: "live", pricing: { input: 0.4, output: 3.2 }, throughput: 90 }],
+  }), "alibaba/qwen3.5-122b-a10b");
+  expect(noTools.capabilities).not.toHaveProperty("tools");
+});
+
+test("Hugging Face skips new reasoning models until their controls are authored", () => {
+  const context = { existing: () => undefined, authored: () => undefined, v2: () => undefined };
+  expect(() => huggingface.translateModel(huggingFaceModel(), context)).toThrow(MissingReasoningOptionsError);
+  // Qwen3 Next Instruct doesn't reason: created.
+  expect(huggingface.translateModel(huggingFaceModel({ id: "Qwen/Qwen3-Next-80B-A3B-Instruct" }), context))
+    .toMatchObject({ v2: { base_model: "alibaba/qwen3-next-80b-a3b-instruct" } });
+  expect(() => buildHuggingFaceModel(huggingFaceModel(), "lab/missing")).toThrow("no lab file");
+});
+
+test("Hugging Face writes existing files back unchanged", () => {
+  const v2 = { schema: 2, base_model: "alibaba/qwen3.5-122b-a10b", cost: { text: { input: { price: 9 }, output: { price: 9 } } } };
+  expect(huggingface.translateModel(huggingFaceModel(), {
+    existing: () => ({ base_model: "alibaba/qwen3.5-122b-a10b" }),
+    authored: () => ({ base_model: "alibaba/qwen3.5-122b-a10b" }),
+    v2: () => v2,
+  })).toEqual({ id: "Qwen/Qwen3.5-122B-A10B", v2 });
+  expect(huggingface.translateModel(huggingFaceModel({ providers: [] }), {
+    existing: () => undefined,
+    authored: () => undefined,
+  })).toBeUndefined();
 });
