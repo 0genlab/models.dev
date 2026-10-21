@@ -165,3 +165,42 @@ test('v2 effort "default" stays the literal "default" in v1', () => {
   const back = modelV2ToV1({ ...(Bun.TOML.parse(formatModelV2(doc)) as Record<string, unknown>), id: "m" });
   expect(back.reasoning_options).toEqual([{ type: "effort", values: ["none", "default", "low"] }]);
 });
+
+test("patchModelV2 keeps a file's other API tables and OpenCode package", () => {
+  const api = {
+    "chat-completions": {
+      sdk: { opencodeai: "@opencode/ai/providers/openai-compatible" },
+      compatibility: { reasoning_field: "reasoning_details" },
+    },
+    images: { base_url: "https://images.example.com/v1", sdk: { opencodeai: "@opencode/ai/protocols/openai-images" } },
+  };
+  const doc = { schema: 2, base_model: "moonshotai/kimi-k2.6", api, cost: { text: { input: { price: 1 }, output: { price: 2 } } } };
+  const before = modelV2ToV1({ ...doc, id: "m" });
+  const { id: _id, ...after } = { ...before, cost: { input: 3, output: 4 } };
+
+  // Unchanged v1 API fields: every table is kept as it is, in order.
+  expect(Object.entries(patchModelV2(doc, before, after).api)).toEqual(Object.entries(api));
+  // A synced change to v1's fields rewrites the first table and keeps the rest.
+  const changed = { ...after, interleaved: { field: "reasoning_content" } };
+  expect(Object.entries(patchModelV2(doc, before, changed).api)).toEqual([
+    [
+      "chat-completions",
+      {
+        sdk: { opencodeai: "@opencode/ai/providers/openai-compatible" },
+        compatibility: { reasoning_field: "reasoning_content" },
+      },
+    ],
+    ["images", api.images],
+  ]);
+});
+
+test('patchModelV2 keeps aisdk = "none" when sync rewrites the first table', () => {
+  const api = { systemone: { base_url: "https://example.com/v1", sdk: { aisdk: "none" } } };
+  const doc = { schema: 2, base_model: "typesafe/jev-1.13", api, cost: { text: { input: { price: 1 }, output: { price: 2 } } } };
+  const before = modelV2ToV1({ ...doc, id: "m" });
+  expect(before.provider).toEqual({ api: "https://example.com/v1" });
+  const { id: _id, ...after } = { ...before, provider: { api: "https://example.com/v2" } };
+  expect(patchModelV2(doc, before, after).api).toEqual({
+    systemone: { base_url: "https://example.com/v2", sdk: { aisdk: "none" } },
+  });
+});
