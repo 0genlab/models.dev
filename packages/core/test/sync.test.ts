@@ -1,9 +1,10 @@
 import { expect, test } from "bun:test";
-import { copyFile, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { formatToml, preserveReasoningOptions, syncProvider, type ExistingModel, type SyncProvider } from "../src/sync/index.js";
+import { formatToml, preserveReasoningOptions, syncProvider, type ExistingModel, type SyncedModel, type SyncProvider } from "../src/sync/index.js";
 import {
   anthropic,
   buildAnthropicModel,
@@ -73,6 +74,7 @@ import {
   buildMergeGatewayModel,
   fetchMergeGatewayModels,
   mergeGateway,
+  mergeGatewayReasoningOptions,
   MergeGatewayResponse,
   selectMergeGatewayVendor,
   type MergeGatewayModel,
@@ -4990,6 +4992,99 @@ test("retains Merge Gateway models missing from an API-key-scoped response", () 
   expect(mergeGateway.deleteMissing).toBe(false);
 });
 
+test("sorts Merge Gateway effort values from low to high", () => {
+  expect(mergeGatewayReasoningOptions({
+    disable_supported: false,
+    controls: ["reasoning_effort"],
+    effort_values: ["high", "max", "low", "none", "medium"],
+  })).toEqual([{ type: "effort", values: ["none", "low", "medium", "high", "max"] }]);
+});
+
+test("maps Merge Gateway long-context pricing to a context tier", () => {
+  const model = buildMergeGatewayModel(mergeGatewayModel({
+    vendors: {
+      openai: mergeGatewayVendor({
+        pricing: {
+          currency: "USD",
+          input_per_million: 5,
+          output_per_million: 30,
+          cache_read_per_million: 0.5,
+          cache_write_per_million: 5,
+          long_context: {
+            threshold_tokens: 272_000,
+            input_per_million: 8,
+            output_per_million: null,
+            cache_read_per_million: 0.8,
+            cache_write_per_million: null,
+          },
+        },
+      }),
+    },
+  }), undefined);
+
+  // A null long-context rate keeps the base rate.
+  expect(model.cost?.tiers).toEqual([{
+    tier: { type: "context", size: 272_000 },
+    input: 8,
+    output: 30,
+    cache_read: 0.8,
+    cache_write: 5,
+  }]);
+});
+
+test("leaves the price of Merge Gateway routes billed per second to the file", () => {
+  const vendor = mergeGatewayVendor({
+    context_window: 448_000,
+    max_output_tokens: 4_096,
+    pricing: { currency: "USD", input_per_million: 0, output_per_million: 0, unit: "per_second", input_per_second: 0.0001 },
+  });
+  vendor.capabilities = { ...vendor.capabilities, input: ["audio"], output: ["text"], supports_tool_calling: false, supports_structured_outputs: false };
+  const model = buildMergeGatewayModel(mergeGatewayModel({
+    model: "openai/whisper-1",
+    display_name: "Whisper",
+    vendors: { openai: vendor },
+  }), { base_model: "openai/whisper-1" });
+
+  expect(model).toBeDefined();
+  expect(model).not.toHaveProperty("cost");
+});
+
+test("Merge Gateway v2 base_model files keep the display name and leave model facts to the lab", () => {
+  const lab = Bun.TOML.parse(readFileSync(path.join(import.meta.dir, "../../../models/openai/gpt-5.6-sol.toml"), "utf8")) as Record<string, any>;
+  const model = buildMergeGatewayModel(mergeGatewayModel({ display_name: "GPT 5.6 Sol (Merge)" }), {
+    base_model: "openai/gpt-5.6-sol",
+    description: lab.description,
+    family: lab.family,
+    release_date: lab.release_date,
+    last_updated: "2026-07-09",
+    knowledge: lab.knowledge,
+    open_weights: lab.open_weights,
+  });
+
+  expect(model).toMatchObject({ base_model: "openai/gpt-5.6-sol", name: "GPT 5.6 Sol (Merge)" });
+  for (const fact of ["description", "family", "release_date", "last_updated", "knowledge", "open_weights"]) {
+    expect(model).not.toHaveProperty(fact);
+  }
+});
+
+test("writes the Merge Gateway toggle wire path for every toggle", () => {
+  const vendor = mergeGatewayVendor();
+  vendor.capabilities = {
+    ...vendor.capabilities,
+    supports_reasoning: true,
+    reasoning: { configurable: true, disable_supported: true, controls: ["thinking"], effort_values: [] },
+  };
+  const translated = mergeGateway.translateModel(mergeGatewayModel({
+    model: "deepseek/deepseek-v4-pro",
+    provider: "deepseek",
+    display_name: "DeepSeek V4 Pro",
+    vendors: { deepseek: vendor },
+  }), { existing: () => undefined, authored: () => undefined });
+
+  expect(translated && "model" in translated ? translated.model.reasoning_options : undefined).toEqual([{ type: "toggle" }]);
+  expect(translated?.header).toStartWith('# Toggle: thinking.type = "enabled"|"disabled"');
+});
+
 test("translates Vercel pricing tiers with an implicit zero minimum", () => {
   const [model] = vercel.parseModels({
     data: [{
@@ -6413,6 +6508,95 @@ test("writes v2 sync entries as is and leaves unchanged files alone", async () =
     price = 20;
     expect(await syncProvider(provider)).toMatchObject({ created: 0, updated: 1, unchanged: 0 });
     expect(await readFile(file, "utf8")).toContain("price = 20");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("v2 patches switch tool_call and reasoning between the lab's value and an override", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "models-dev-v2-flags-"));
+  const modelsDir = path.join(root, "providers", "example", "models");
+  await mkdir(path.join(root, "models", "lab"), { recursive: true });
+  await mkdir(path.join(modelsDir, "lab"), { recursive: true });
+  await writeFile(path.join(root, "models", "lab", "chat.toml"), [
+    "schema = 2",
+    'name = "Chat"',
+    'description = "Example chat model"',
+    "open_weights = false",
+    'release_date = "2026-01-01"',
+    "",
+    "[modalities]",
+    'input = ["text"]',
+    'output = ["text"]',
+    "",
+    "[capabilities]",
+    "tools = { supported = true }",
+    "reasoning = { supported = false }",
+    "temperature = true",
+    "top_p = true",
+    "top_k = false",
+    "",
+    "[limit]",
+    "context = 100_000",
+    "output = 10_000",
+    "",
+  ].join("\n"));
+  const file = path.join(modelsDir, "lab", "chat.toml");
+  const write = (capabilities: string[]) => writeFile(file, [
+    "schema = 2",
+    'base_model = "lab/chat"',
+    "",
+    "[capabilities]",
+    ...capabilities,
+    "effort_updates = false",
+    "",
+    "[cost.text.input]",
+    "price = 1",
+    "",
+    "[cost.text.output]",
+    "price = 2",
+    "",
+  ].join("\n"));
+  let synced: SyncedModel = { base_model: "lab/chat", cost: { input: 1, output: 2 } };
+  const provider: SyncProvider<string> = {
+    id: "v2-flags-test",
+    name: "v2 flags test",
+    modelsDir,
+    async fetchModels() {
+      return ["lab/chat"];
+    },
+    parseModels(raw) {
+      return raw as string[];
+    },
+    translateModel(id) {
+      return { id, model: synced };
+    },
+  };
+
+  try {
+    // The file inherits tools from the lab; the source now reports none.
+    await write([]);
+    synced = { base_model: "lab/chat", tool_call: false, cost: { input: 1, output: 2 } };
+    expect(await syncProvider(provider)).toMatchObject({ updated: 1 });
+    let doc = Bun.TOML.parse(await readFile(file, "utf8")) as Record<string, any>;
+    expect(doc.capabilities).toEqual({ effort_updates: false, tools: { supported: false } });
+
+    // The source reports tools again, which the lab already says: the override goes.
+    synced = { base_model: "lab/chat", cost: { input: 1, output: 2 } };
+    expect(await syncProvider(provider)).toMatchObject({ updated: 1 });
+    doc = Bun.TOML.parse(await readFile(file, "utf8")) as Record<string, any>;
+    expect(doc.capabilities).toEqual({ effort_updates: false });
+
+    // An explicit value equal to the lab's, with v2-only data, is left alone.
+    await write(["tools = { supported = true, updates = false }"]);
+    expect(await syncProvider(provider)).toMatchObject({ updated: 0, unchanged: 1 });
+
+    // Reasoning switches the same way.
+    synced = { base_model: "lab/chat", reasoning: true, reasoning_options: [], cost: { input: 1, output: 2 } };
+    expect(await syncProvider(provider)).toMatchObject({ updated: 1 });
+    doc = Bun.TOML.parse(await readFile(file, "utf8")) as Record<string, any>;
+    expect(doc.capabilities.reasoning).toEqual({ supported: true });
+    expect(doc.capabilities.tools).toEqual({ supported: true, updates: false });
   } finally {
     await rm(root, { recursive: true, force: true });
   }
