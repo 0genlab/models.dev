@@ -246,18 +246,29 @@ export const openrouter = {
       const authored = context.authored(model.id);
       return authored === undefined ? undefined : { id: model.id, model: authored as SyncedModel };
     }
-    const translated = buildOpenRouterModel(model, context.existing(model.id));
+    const built = buildOpenRouterModel(model, context.existing(model.id));
+    // The decision model's first API (systemone) names its own AI SDK package,
+    // which v1 reads as the model's provider npm.
+    const translated = isDecisionModel(model)
+      ? { ...built, provider: { npm: DECISION_APIS.systemone.sdk.aisdk } }
+      : built;
     // Without a catalog price the file's cost is kept as is.
     const catalog = price(model.pricing.prompt) === undefined || price(model.pricing.completion) === undefined
       ? undefined
       : catalogV2Set(model, context.v2?.(model.id));
+    const api = isDecisionModel(model)
+      ? DECISION_APIS
+      : "base_model" in built && typeof built.base_model === "string" && rawLabModel(built.base_model)?.type === "image"
+        ? IMAGE_CHAT_APIS
+        : undefined;
+    const v2Set = api === undefined ? catalog?.v2Set : { ...catalog?.v2Set, api: structuredClone(api) };
     return {
       id: model.id,
       model: translated,
       header: translated.reasoning_options?.some((option) => option.type === "toggle")
         ? "# Toggle: reasoning.enabled = true|false\n# https://openrouter.ai/docs/guides/best-practices/reasoning-tokens\n"
         : undefined,
-      v2Set: catalog?.v2Set,
+      v2Set,
       notices: catalog?.notices,
     };
   },
@@ -275,6 +286,23 @@ function isUnavailable(model: OpenRouterModel) {
 function isDecisionModel(model: OpenRouterModel) {
   return model.architecture.output_modalities.includes("decisions");
 }
+
+// Decision models answer POST /api/v1/systemone, which OpenCode's openrouter
+// entry (experimental.evaluation) and @ai-sdk/typesafe-ai's decisionModel (with
+// this baseURL) call, and POST /api/alpha/decisions, which
+// the OpenRouter AI SDK provider's evaluationModel calls.
+// https://openrouter.ai/docs/api/api-reference/systemone/submit-a-system-one-request
+// https://openrouter.ai/docs/api/api-reference/alphadecisions/submit-a-decisions-request
+const DECISION_APIS = {
+  systemone: { sdk: { aisdk: "@ai-sdk/typesafe-ai", opencodeai: "@opencode/ai/providers/openrouter" } },
+  decisions: { base_url: "https://openrouter.ai/api/alpha", sdk: { opencodeai: "none" } },
+};
+// Chat models whose lab is an image model are also served by the /images router
+// (https://openrouter.ai/api/v1/images/models), which answers OpenAI's format.
+const IMAGE_CHAT_APIS = {
+  "chat-completions": {},
+  images: { sdk: { opencodeai: "@opencode/ai/protocols/openai-images" } },
+};
 
 // ---------------------------------------------------------------------------
 // Speech, transcription, embedding, rerank and image models (v2-only files)
@@ -295,8 +323,10 @@ const BASE_URL = "https://openrouter.ai/api/v1";
 
 // Each type has its own OpenRouter endpoint. Speech and transcription follow
 // OpenAI's audio API ("compatible with the OpenAI SDK"), and the OpenRouter AI
-// SDK provider implements embeddings. No AI SDK package speaks OpenRouter's
-// rerank API.
+// SDK provider implements embeddings. Rerank takes and returns Cohere's rerank
+// shape, so @ai-sdk/cohere works against it. Images also answer OpenAI's
+// /images/generations, so OpenCode uses its OpenAI media protocols for images,
+// speech and transcription; it has none for video, embeddings or rerank.
 // https://openrouter.ai/docs/api/api-reference/tts/create-speech (POST /audio/speech)
 // https://openrouter.ai/docs/api/api-reference/stt/create-transcription (POST /audio/transcriptions)
 // https://openrouter.ai/docs/api/api-reference/embeddings/submit-an-embedding-request (POST /embeddings)
@@ -305,13 +335,17 @@ const BASE_URL = "https://openrouter.ai/api/v1";
 // AI SDK provider's imageModel)
 // https://openrouter.ai/docs/guides/overview/multimodal/video-generation (POST /videos; the OpenRouter
 // AI SDK provider's videoModel)
-const MEDIA_APIS: Record<MediaType, { protocol: string; aisdk?: string }> = {
-  speech: { protocol: "speech", aisdk: "@ai-sdk/openai" },
-  transcription: { protocol: "transcriptions", aisdk: "@ai-sdk/openai" },
-  embedding: { protocol: "embeddings", aisdk: "@openrouter/ai-sdk-provider" },
-  reranking: { protocol: "rerank" },
-  image: { protocol: "images", aisdk: "@openrouter/ai-sdk-provider" },
-  video: { protocol: "videos", aisdk: "@openrouter/ai-sdk-provider" },
+const MEDIA_APIS: Record<MediaType, { protocol: string; aisdk: string; opencodeai: string }> = {
+  speech: { protocol: "speech", aisdk: "@ai-sdk/openai", opencodeai: "@opencode/ai/protocols/openai-speech" },
+  transcription: {
+    protocol: "transcriptions",
+    aisdk: "@ai-sdk/openai",
+    opencodeai: "@opencode/ai/protocols/openai-transcription",
+  },
+  embedding: { protocol: "embeddings", aisdk: "@openrouter/ai-sdk-provider", opencodeai: "none" },
+  reranking: { protocol: "rerank", aisdk: "@ai-sdk/cohere", opencodeai: "none" },
+  image: { protocol: "images", aisdk: "@openrouter/ai-sdk-provider", opencodeai: "@opencode/ai/protocols/openai-images" },
+  video: { protocol: "videos", aisdk: "@openrouter/ai-sdk-provider", opencodeai: "none" },
 };
 
 const MEDIA_HEADERS: Record<MediaType, string> = {
@@ -722,10 +756,7 @@ export function buildOpenRouterMediaModel(
   }
 
   doc.api = {
-    [api.protocol]: {
-      base_url: BASE_URL,
-      ...(api.aisdk !== undefined ? { sdk: { aisdk: api.aisdk } } : {}),
-    },
+    [api.protocol]: { base_url: BASE_URL, sdk: { aisdk: api.aisdk, opencodeai: api.opencodeai } },
   };
   const cost = mediaCost(model, type);
   if (cost !== undefined) doc.cost = cost;

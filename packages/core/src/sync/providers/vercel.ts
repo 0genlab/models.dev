@@ -119,6 +119,7 @@ export const vercel = {
       header: translated.reasoning_options?.some((option) => option.type === "toggle")
         ? "# Toggle: reasoning.enabled = true|false\n# https://vercel.com/docs/ai-gateway/sdks-and-apis/openai-chat-completions/reasoning\n"
         : undefined,
+      ...(model.type === "evaluation" ? { v2Set: { api: structuredClone(DECISION_APIS) } } : {}),
     };
   },
   sameModel(current, desired) {
@@ -471,8 +472,23 @@ const MEDIA_PROTOCOLS: Record<MediaType, string> = {
   realtime: "realtime",
 };
 // GPT-Live has its own Live endpoint (wss .../v4/ai/live-model), not the
-// realtime one: https://vercel.com/docs/ai-gateway/modalities/realtime/gpt-live
+// realtime one, and @ai-sdk/gateway has no Live model:
+// https://vercel.com/docs/ai-gateway/modalities/realtime/gpt-live
 const LIVE_MODELS = new Set(["openai/gpt-live-1"]);
+// OpenCode's vercel-ai-gateway entry point only speaks the chat APIs, not
+// these endpoints.
+const MEDIA_SDK = { opencodeai: "none" };
+// Decision models: POST /v1/evaluate, which OpenCode's vercel-ai-gateway entry
+// calls (experimental.evaluation). @ai-sdk/gateway's decisionModel uses its own
+// /v4/ai/decision-model endpoint instead.
+// https://vercel.com/docs/ai-gateway/modalities/decision
+const DECISION_APIS = {
+  evaluate: {
+    base_url: "https://ai-gateway.vercel.sh/v1",
+    sdk: { aisdk: "none", opencodeai: "@opencode/ai/providers/vercel-ai-gateway" },
+  },
+};
+const LIVE_SDK = { aisdk: "none", opencodeai: "none" };
 
 const MEDIA_HEADERS: Record<MediaType, string> = {
   image: "# Synced from https://ai-gateway.vercel.sh/v1/models (type image)\n# https://vercel.com/docs/ai-gateway/modalities/image-generation\n",
@@ -599,7 +615,9 @@ export function buildVercelMediaModel(
     doc.limit = mediaLimit(model, type, undefined, existing?.limit?.context);
   }
 
-  doc.api = { [LIVE_MODELS.has(model.id) ? "live" : MEDIA_PROTOCOLS[type]]: { base_url: MEDIA_BASE_URL } };
+  doc.api = LIVE_MODELS.has(model.id)
+    ? { live: { base_url: MEDIA_BASE_URL, sdk: { ...LIVE_SDK } } }
+    : { [MEDIA_PROTOCOLS[type]]: { base_url: MEDIA_BASE_URL, sdk: { ...MEDIA_SDK } } };
   const { cost, issue } = vercelMediaCost(model, type);
   if (issue !== undefined) console.warn(`Vercel ${model.id}: no cost written, ${issue}`);
   if (cost !== undefined) doc.cost = cost;
