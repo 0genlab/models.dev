@@ -1,5 +1,5 @@
 # Modalities: Sonar image formats PNG, JPEG, WEBP, GIF, https://docs.perplexity.ai/docs/sonar/media
-# Mid-conversation (@ai-sdk/gateway, live 2026-10-19, default route): a mid-conversation system message stays in place (cache prefix kept). Per-turn effort and tool changes exist only for Anthropic models on this API.
+# Mid-conversation (@ai-sdk/gateway, live 2026-10-23): A mid-conversation system message is accepted and the prefix stays cached (9501 vs warm 9521, 2 trials), though Sonar didn't switch to French. This host lists no cached-input price, so there is no cache to lose and system_updates stays true; effort_updates and tools.updates need a cache and stay off.
 schema = 2
 name = "Sonar"
 description = "Sonar search model for current answers, retrieval, and citation-backed chat"
