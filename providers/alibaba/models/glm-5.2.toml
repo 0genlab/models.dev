@@ -8,6 +8,7 @@
 # Toggle: enable_thinking true|false
 # Effort: reasoning_effort = high|max (default high; low/medium map to high, xhigh to max) per the Chat API reference
 # JSON: json_schema accepted live 2026-10-19 (the Recommended models table lists structured output for glm-5.2)
+# Web search: $10 per 1,000 calls in Singapore (agent policy, also the Responses and Anthropic web_search tool rate): https://www.alibabacloud.com/help/en/model-studio/web-search (accessed 2026-10-23).
 schema = 2
 base_model = "zhipuai/glm-5.2"
 
@@ -23,9 +24,19 @@ cache = { implicit = { min_tokens = 1_024 } }
 [api.chat-completions]
 compatibility = { reasoning_field = "reasoning_content" }
 
+[api.responses]
+sdk = { aisdk = "@ai-sdk/openai", opencodeai = "@opencode/ai/providers/alibaba/responses" }
+
+[api.messages]
+base_url = "https://dashscope-intl.aliyuncs.com/apps/anthropic/v1"
+sdk = { aisdk = "@ai-sdk/anthropic", opencodeai = "@opencode/ai/providers/alibaba/messages" }
+
 [cost.text.input]
 price = 1.4
 cache = { read = 0.28, write = 0 }
 
 [cost.text.output]
 price = 4.4
+
+[cost.web_search]
+price = 10
