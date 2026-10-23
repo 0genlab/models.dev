@@ -3,6 +3,7 @@
 # Highspeed serves the same model intelligence at 2-3x the speed and about 2x the subscription consumption.
 # Always thinks: reasoning_effort = "low" | "high" | "max" (default "max"); none/disabled returns HTTP 400.
 # Switching reasoning effort invalidates the context cache. Cost is zeroed per this provider's subscription convention.
+# prompt_cache_key is required for good cache hit rates on Kimi Code Plan (https://platform.kimi.ai/docs/api/chat).
 schema = 2
 base_model = "moonshotai/kimi-k3.1-pro"
 name = "Kimi K3.1 Pro Highspeed"
@@ -10,7 +11,7 @@ name = "Kimi K3.1 Pro Highspeed"
 [capabilities]
 reasoning = { supported = true, default = { type = "effort", value = "max" }, effort = ["low", "high", "max"] }
 structured_output = true
-effort_updates = false
+prompt_cache_key = true
 cache = { implicit = true }
 
 [api.chat-completions]
