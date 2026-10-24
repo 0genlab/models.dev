@@ -9,7 +9,7 @@ reasoning = { supported = true, budget = {} }
 cache = { implicit = true, explicit = true }
 
 [api.chat-completions]
-compatibility = { replay_reasoning = true }
+legacy_interleaved = true
 
 [api.responses]
 base_url = "https://ai-gateway.vercel.sh/v1"

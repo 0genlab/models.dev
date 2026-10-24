@@ -8,7 +8,7 @@ reasoning = { supported = true, effort = ["none", "low", "medium", "high", "max"
 cache = { explicit = true }
 
 [api.chat-completions]
-compatibility = { replay_reasoning = true }
+legacy_interleaved = true
 
 [api.responses]
 base_url = "https://ai-gateway.vercel.sh/v1"
