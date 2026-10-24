@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 
+import { MODEL_TYPES } from "./filter.js";
 import {
   AuthoredModelV2,
   LabMetadataV2,
@@ -76,6 +77,22 @@ export function providerTomlToV1(toml: Record<string, unknown>): Record<string, 
   return v1;
 }
 
+// v1's `type` enum can't grow, so a type it doesn't know is v2-only: the model
+// must set `v2_only = true`, and v1 leaves the type out.
+export function v1ModelType(
+  type: string | undefined,
+  v2Only: boolean | undefined,
+  cause: Record<string, unknown> = {},
+) {
+  if (type === undefined || (MODEL_TYPES as readonly string[]).includes(type)) return type;
+  if (v2Only !== true) {
+    throw new Error(`Model type "${type}" isn't a v1 type, so the model must set \`v2_only = true\` (see AGENTS.md)`, {
+      cause,
+    });
+  }
+  return undefined;
+}
+
 export function labModelV2ToV1(
   toml: Record<string, unknown>,
   cause: Record<string, unknown> = {},
@@ -91,7 +108,7 @@ export function labModelV2ToV1(
 
   return withoutUndefined({
     id: lab.id,
-    type: lab.type,
+    type: v1ModelType(lab.type, lab.v2_only, { ...cause, toml }),
     name: lab.name,
     description: lab.description,
     family: lab.family,
@@ -143,7 +160,7 @@ export function modelV2ToV1(
     id: model.id,
     base_model: model.base_model,
     base_model_omit: model.base_model_omit,
-    type: model.type,
+    type: v1ModelType(model.type, model.v2_only, { ...cause, toml }),
     name: model.name,
     description: model.description,
     family: model.family,
