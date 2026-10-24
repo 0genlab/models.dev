@@ -367,6 +367,11 @@ export const CompatibilityV2 = z
   .object({
     reasoning_field: ReasoningFieldV2.optional(),
     max_tokens_field: MaxTokensFieldV2.optional(),
+    // `systemone` only: where the host wants images. "assets" (the default):
+    // TypeSafe's `assets` map, referenced from strings, with the
+    // `TypeSafe-Danger-Zone-Images: true` header. "images": a top-level `images`
+    // list next to `state`. "state": chat-style `image_url` items in a `state` list.
+    image_input: z.enum(["assets", "images", "state"]).optional(),
   })
   .strict();
 
@@ -841,6 +846,7 @@ export const AuthoredApiEntryV2 = z
       .optional(),
     compatibility: CompatibilityV2.pick({ reasoning_field: true })
       .strict()
+      .extend({ image_input: CompatibilityV2.shape.image_input })
       .optional(),
     capabilities: ApiCapabilitiesV2.optional(),
     // Legacy, v1-only: the v1 `provider.shape` of a file that states its SDK's
@@ -854,6 +860,28 @@ export const AuthoredApiEntryV2 = z
   .strict();
 
 export type AuthoredApiEntryV2 = z.infer<typeof AuthoredApiEntryV2>;
+
+// Compatibility fields that only mean something on one protocol.
+const COMPATIBILITY_PROTOCOLS = {
+  reasoning_field: "chat-completions",
+  image_input: "systemone",
+} as const;
+
+export const AuthoredApisV2 = z
+  .record(ApiProtocolV2, AuthoredApiEntryV2)
+  .superRefine((tables, ctx) => {
+    for (const [protocol, table] of Object.entries(tables)) {
+      for (const field of Object.keys(COMPATIBILITY_PROTOCOLS) as (keyof typeof COMPATIBILITY_PROTOCOLS)[]) {
+        const allowed = COMPATIBILITY_PROTOCOLS[field];
+        if (table.compatibility?.[field] === undefined || protocol === allowed) continue;
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [protocol, "compatibility", field],
+          message: `compatibility.${field} is only allowed on [api.${allowed}], not [api.${protocol}]`,
+        });
+      }
+    }
+  });
 
 // Authored provider model file (`providers/<provider>/models/<model>.toml`). With
 // `base_model`, it holds only what differs from the lab file. Without it, it is a
@@ -878,7 +906,7 @@ export const AuthoredModelV2 = z
     capabilities: CapabilitiesOverrideV2.optional(),
     limit: LimitV2.optional(),
     cost: CostV2.optional(),
-    api: z.record(ApiProtocolV2, AuthoredApiEntryV2).optional(),
+    api: AuthoredApisV2.optional(),
     experimental: ExperimentalV2.optional(),
     metadata: z.record(JsonValue).optional(),
   })
