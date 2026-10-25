@@ -797,6 +797,36 @@ test("factored NanoGPT models inherit missing intrinsic metadata without zero ov
   expect(sparse).not.toHaveProperty("modalities");
 });
 
+test("NanoGPT base_model routes use the context window when no source states an output limit", () => {
+  const model = buildNanoGptModel(nanoGptModel({
+    id: "aleph-alpha/kolibri-1",
+    context_length: 1_048_576,
+    max_output_tokens: null,
+  }), undefined);
+
+  expect(model).toMatchObject({
+    base_model: "aleph-alpha/kolibri-1",
+    limit: { output: 1_048_576 },
+  });
+});
+
+test("new NanoGPT text models use the context window when no output limit is stated", () => {
+  const text = buildNanoGptModel(nanoGptModel({
+    id: "example/unlisted-model",
+    context_length: 30_000,
+    max_output_tokens: null,
+  }), undefined);
+  const decision = buildNanoGptModel(nanoGptModel({
+    id: "example/decision-model",
+    context_length: 32_768,
+    max_output_tokens: 0,
+    architecture: { input_modalities: ["text"], output_modalities: ["decisions"] },
+  }), undefined);
+
+  expect(text).toMatchObject({ limit: { context: 30_000, output: 30_000 } });
+  expect(decision).toBeUndefined();
+});
+
 test("NanoGPT base_model files leave model facts to the lab", () => {
   const model = buildNanoGptModel(nanoGptModel({
     id: "google/gemini-2.5-pro",
