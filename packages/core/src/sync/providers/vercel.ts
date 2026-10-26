@@ -67,6 +67,7 @@ export const VercelModel = z.object({
   // text/text handling in buildVercelModel instead of failing the whole sync.
   type: KnownModelType.or(z.string()),
   tags: z.array(z.string()).optional().default([]),
+  supported_parameters: z.array(z.string()).optional().default([]),
   // Keep the catalog parse forward-compatible with new control shapes or
   // effort values; unresolved options retain the authored menu below.
   reasoning_options: z.array(z.unknown()).optional(),
@@ -121,7 +122,13 @@ export const vercel = {
     const type = existing?.type ?? (baseModel === undefined ? undefined : labDoc(baseModel)?.type);
     const v2Set = {
       ...(model.type === "evaluation" ? { api: structuredClone(DECISION_APIS) } : {}),
-      ...(model.type === "language" && (type ?? "chat") === "chat" ? { api: chatApis } : {}),
+      ...(model.type === "language" && (type ?? "chat") === "chat"
+        ? {
+          api: chatApis,
+          "capabilities.tools": (current: unknown) =>
+            toolChoice(model, existing, baseModel === undefined ? undefined : labToolChoice(baseModel), current),
+        }
+        : {}),
       ...(cache === undefined ? {} : { "capabilities.cache": cache }),
     };
     return {
@@ -134,6 +141,31 @@ export const vercel = {
     };
   },
 } satisfies SyncProvider<VercelModel>;
+
+// A tool-calling model that lists `tool_choice` takes "auto", "none", "required"
+// and a named function, narrowed to the base model's own `choice` when its lab
+// file sets one. A choice equal to the lab's is inherited, not restated.
+// https://vercel.com/docs/ai-gateway/inputs-and-tools/tool-use
+// https://vercel.com/docs/ai-gateway/sdks-and-apis/openai-chat-completions/tool-calling
+function toolChoice(model: VercelModel, existing: ExistingModel | undefined, labChoice: unknown[] | undefined, current: unknown) {
+  const { choice: _choice, ...rest } = (current ?? {}) as Doc;
+  const tools = existing?.tool_call ?? model.tags.includes("tool-use");
+  const choice = ["auto", "none", "required", "tool"].filter((value) => labChoice?.includes(value) ?? true);
+  if (!tools || !model.supported_parameters.includes("tool_choice") || sameChoice(choice, labChoice)) {
+    return Object.keys(rest).length > 0 ? rest : undefined;
+  }
+  return { ...rest, supported: true, choice };
+}
+
+function sameChoice(choice: string[], labChoice: unknown[] | undefined) {
+  return labChoice !== undefined && choice.length === labChoice.length && choice.every((value) => labChoice.includes(value));
+}
+
+// The `tools.choice` a lab file sets for the model on every host.
+function labToolChoice(modelID: string) {
+  const tools = labDoc(modelID)?.capabilities?.tools;
+  return Array.isArray(tools?.choice) ? tools.choice as unknown[] : undefined;
+}
 
 // The catalog tags each model `implicit-caching` and/or `explicit-caching`. An
 // untagged model with a cache read price caches implicitly, except Anthropic's,
