@@ -270,7 +270,12 @@ export const openrouter = {
         : isTextOnly(model)
           ? withTextApis
           : undefined;
-    const v2Set = api === undefined ? catalog?.v2Set : { ...catalog?.v2Set, api };
+    const v2Set = {
+      ...catalog?.v2Set,
+      ...(api === undefined ? {} : { api }),
+      "capabilities.tools": (current: unknown) =>
+        toolChoice(model.supported_parameters.includes("tool_choice"), "base_model" in built ? labToolChoice(built.base_model) : undefined, current),
+    };
     return {
       id: model.id,
       model: translated,
@@ -282,6 +287,28 @@ export const openrouter = {
     };
   },
 } satisfies SyncProvider<OpenRouterModel>;
+
+// A model that lists `tool_choice` takes every documented value ("auto", "none",
+// "required" and a named function), narrowed to the base model's own `choice`
+// when its lab file sets one. A choice equal to the lab's is inherited, not restated.
+// https://openrouter.ai/docs/api-reference/parameters#tool-choice
+function toolChoice(listed: boolean, labChoice: unknown[] | undefined, current: unknown) {
+  const { choice: _choice, ...rest } = isPlainObject(current) ? current : {};
+  const choice = ["auto", "none", "required", "tool"].filter((value) => labChoice?.includes(value) ?? true);
+  if (!listed || rest.supported === false || sameChoice(choice, labChoice)) return Object.keys(rest).length > 0 ? rest : undefined;
+  return { ...rest, supported: true, choice };
+}
+
+function sameChoice(choice: string[], labChoice: unknown[] | undefined) {
+  return labChoice !== undefined && choice.length === labChoice.length && choice.every((value) => labChoice.includes(value));
+}
+
+// The `tools.choice` a lab file sets for the model on every host.
+function labToolChoice(modelID: string) {
+  const capabilities = rawLabModel(modelID)?.capabilities;
+  const tools = isPlainObject(capabilities) ? capabilities.tools : undefined;
+  return isPlainObject(tools) && Array.isArray(tools.choice) ? tools.choice : undefined;
+}
 
 function isUnavailable(model: OpenRouterModel) {
   return (
