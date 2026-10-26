@@ -14,6 +14,7 @@ import {
   gatewayTools,
   mediaCost,
   routeModalities,
+  splitLabTools,
 } from "../src/sync/providers/cloudflare-ai-gateway.js";
 
 test("missing reasoning controls open issues without deleting existing models or blocking valid ones", async () => {
@@ -453,6 +454,39 @@ test("native routes take the lab's own tool fields, with the schema's choice whe
   expect(gatewayTools(current, { strict: true }, schema)).toEqual({ supported: true, updates: true, choice: ["auto", "none"], strict: true });
   expect(gatewayTools(current, { choice: ["auto"] }, schema)).toEqual({ supported: true, updates: true, choice: ["auto"] });
   expect(gatewayTools({ supported: false }, { strict: true }, schema)).toEqual({ supported: false });
+});
+
+test("each gateway API takes the lab's tool fields for its protocol", () => {
+  const choice = ["auto", "none", "required", "tool"];
+  const lab = {
+    top: {},
+    apis: { responses: { strict: true, choice, search: true, grammar: ["lark"] }, "chat-completions": { strict: true, choice, grammar: ["lark"] } },
+  };
+  // Values every gateway API holds go top-level, the rest on their API; a protocol the gateway doesn't list is ignored.
+  expect(splitLabTools({ ...lab, apis: { ...lab.apis, decisions: {} } }, ["responses", "chat-completions"])).toEqual({
+    top: { strict: true, choice, grammar: ["lark"] },
+    apis: { responses: { search: true }, "chat-completions": {} },
+  });
+  // A value one API leaves out stays off the top level.
+  expect(splitLabTools({ top: { choice }, apis: { responses: { strict: true } } }, ["responses", "messages"])).toEqual({
+    top: { choice },
+    apis: { responses: { strict: true }, messages: {} },
+  });
+  expect(splitLabTools(lab, ["responses"])).toEqual({ top: { strict: true, choice, search: true, grammar: ["lark"] }, apis: { responses: {} } });
+
+  const main = "@opencode/ai/providers/cloudflare-ai-gateway";
+  const current = {
+    responses: { sdk: { aisdk: "@ai-sdk/openai", opencodeai: main }, capabilities: { effort_updates: true, tools: { search: true, updates: true } } },
+    "chat-completions": { base_url: "stale", capabilities: { tools: { search: true } } },
+  };
+  // Tool fields are replaced per table; other capabilities and `updates` are kept, and an empty table loses capabilities.
+  expect(gatewayApis(current, "responses", ["responses", "chat-completions"], { responses: { strict: true }, "chat-completions": {} })).toEqual({
+    responses: { sdk: { aisdk: "@ai-sdk/openai", opencodeai: main }, capabilities: { effort_updates: true, tools: { strict: true, updates: true } } },
+    "chat-completions": {
+      base_url: "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1",
+      sdk: { aisdk: "@ai-sdk/openai-compatible", opencodeai: main },
+    },
+  });
 });
 
 test("syncs Jev through shared TypeSafe metadata without inventing tool support", async () => {
