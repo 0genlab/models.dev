@@ -11,6 +11,7 @@ import {
   cloudflareAiGateway,
   deriveReasoningOptions,
   gatewayApis,
+  gatewayTools,
   mediaCost,
   routeModalities,
 } from "../src/sync/providers/cloudflare-ai-gateway.js";
@@ -421,6 +422,37 @@ test("rejects a catalog with no eligible proxied models", async () => {
     restoreEnv("CLOUDFLARE_API_TOKEN", originalToken);
     restoreEnv("CLOUDFLARE_ACCOUNT_ID", originalAccount);
   }
+});
+
+test("takes tool_choice values from the catalog schema when it names them", () => {
+  const toolsSet = (model_id: string, schemaInput: unknown) => (cloudflareAiGateway.translateModel({
+    catalog: {
+      model_id,
+      task: "Text Generation" as const,
+      provider_details: providerDetails({ input_tokens: 1, output_tokens: 2 }),
+    },
+    schemaInput,
+  }, { authored: () => undefined, existing: () => undefined }) as unknown as {
+    v2Set: Record<string, (current: unknown) => unknown>;
+  }).v2Set["capabilities.tools"]!;
+
+  const effort = { reasoning: { properties: { effort: { enum: ["low", "high"] } } } };
+  const minimax = { oneOf: [{ properties: { ...effort, tool_choice: { type: "string", enum: ["none", "auto"] } } }] };
+  expect(toolsSet("minimax/m3.1-flash", minimax)(undefined)).toEqual({ supported: true, choice: ["auto", "none"] });
+  // A schema that leaves tool_choice open keeps the file's tools table.
+  const current = { supported: true, choice: ["auto"] };
+  expect(toolsSet("xai/grok-4.7", { properties: { ...effort, tool_choice: { type: "string" } } })(current)).toBe(current);
+});
+
+test("native routes take the lab's own tool fields, with the schema's choice when the lab has none", () => {
+  const schema = { properties: { tool_choice: { type: "string", enum: ["auto", "none"] } } };
+  const current = { supported: true, updates: true, strict: true, search: true, choice: ["auto"] };
+  // The lab's fields replace the file's, keeping fields the lab doesn't own (updates).
+  expect(gatewayTools(current, { strict: true, choice: ["auto", "none", "required", "tool"] }, undefined))
+    .toEqual({ supported: true, updates: true, strict: true, choice: ["auto", "none", "required", "tool"] });
+  expect(gatewayTools(current, { strict: true }, schema)).toEqual({ supported: true, updates: true, choice: ["auto", "none"], strict: true });
+  expect(gatewayTools(current, { choice: ["auto"] }, schema)).toEqual({ supported: true, updates: true, choice: ["auto"] });
+  expect(gatewayTools({ supported: false }, { strict: true }, schema)).toEqual({ supported: false });
 });
 
 test("syncs Jev through shared TypeSafe metadata without inventing tool support", async () => {
