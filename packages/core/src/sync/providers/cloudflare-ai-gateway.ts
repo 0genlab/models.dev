@@ -327,7 +327,7 @@ export const cloudflareAiGateway = {
       header: noteHeader([...prefixNotes(id), ...curated.note ?? []]),
       v2Set: {
         api: decision
-          ? () => RUN_API
+          ? () => DECISION_RUN_API
           : (current: unknown) => gatewayApis(current, native?.protocol, source.catalog.request_formats),
       },
     };
@@ -390,11 +390,19 @@ export function buildCloudflareAiGatewayModel(
 // schema. Generated media comes back as a URL (or a data URI), transcripts as text.
 // Decision models (TypeSafe Jev) take a System One body as `input` and answer in a run
 // record: `{ result: { state: "Completed", result: { answers, usage } } }`.
-// No @opencode/ai entry point speaks /ai/run, so there's no OpenCode package.
+// @opencode/ai speaks /ai/run for decision models only, through its
+// cloudflare-run-decisions protocol, which posts to the full Run URL (Workers AI
+// tables put it all in base_url). v1 publishes base_url, so `/run` goes in path.
+// Media models have no OpenCode package.
+const RUN_BASE_URL = "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai";
 const RUN_API = {
+  "workers-ai-run": { base_url: RUN_BASE_URL, sdk: { opencodeai: "none" } },
+};
+const DECISION_RUN_API = {
   "workers-ai-run": {
-    base_url: "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai",
-    sdk: { opencodeai: "none" },
+    base_url: RUN_BASE_URL,
+    path: "/run",
+    sdk: { opencodeai: "@opencode/ai/protocols/cloudflare-run-decisions" },
   },
 };
 
