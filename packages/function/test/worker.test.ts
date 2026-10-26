@@ -50,6 +50,13 @@ describe("catalog API model type filtering", () => {
     expect(Object.keys(body.providers.example.models)).toEqual(["decision"]);
   });
 
+  test("combines repeated type parameters", async () => {
+    const response = await request("/models.json?type=chat&type=decision");
+    const body = await response.json();
+
+    expect(Object.keys(body)).toEqual(["text", "decision"]);
+  });
+
   test("returns the complete static catalog for all", async () => {
     const response = await request("/models.json?type=all");
     const body = await response.json();
@@ -83,6 +90,14 @@ describe("catalog API model type filtering", () => {
 
     expect(response.status).toBe(200);
     expect(body).toEqual(providers);
+  });
+
+  test("serves one experimental v2.0 type from its prebuilt file", async () => {
+    const response = await request("/experimental/v2.0/api.json?type=decision");
+    const body = await response.json();
+
+    expect(response.headers.get("etag")).toBe('"v2-decision"');
+    expect(Object.keys(body.example.models)).toEqual(["decision"]);
   });
 });
 
@@ -190,6 +205,12 @@ async function request(
         const pathname = new URL(input.url).pathname;
         if (pathname === "/_experimental_v2.0_api.json") {
           return Response.json(providers);
+        }
+        if (pathname === "/_experimental_v2.0_api-decision.json") {
+          return Response.json(
+            { example: { ...providers.example, models: { decision: decisionModel } } },
+            { headers: { etag: '"v2-decision"' } },
+          );
         }
         if (pathname === "/_api.json") {
           return Response.json({
